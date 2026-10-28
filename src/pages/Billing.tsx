@@ -565,8 +565,8 @@ const Billing: React.FC = () => {
                             : "hover:bg-sky-50 dark:hover:bg-slate-700/50"
                         }`}
                       >
-                        <div>
-                          <div className="flex items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className={`font-semibold text-sm ${isNarc ? "text-rose-700 dark:text-rose-300" : "text-slate-800 dark:text-slate-200"}`}>
                               {m.name}
                             </span>
@@ -631,7 +631,7 @@ const Billing: React.FC = () => {
                     return (
                       <tr key={i.medicineId} className={i.narcotic ? "bg-rose-50/40 dark:bg-rose-950/20" : ""}>
                         <Td>
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="font-semibold text-slate-800 dark:text-slate-100">{i.name}</span>
                             {i.narcotic && <Badge tone="red">NARCOTIC</Badge>}
                           </div>

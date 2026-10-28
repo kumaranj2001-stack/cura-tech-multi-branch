@@ -110,11 +110,11 @@ const InvoicePrint: React.FC<{ invoice: Invoice; onClose: () => void }> = ({ inv
   const spin = <span className="w-3.5 h-3.5 border-2 border-current/40 border-t-current rounded-full animate-spin" />;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-        <div className="no-print sticky top-0 bg-white border-b border-slate-200 px-5 py-3 flex flex-wrap items-center justify-between gap-2 z-10">
-          <div className="font-semibold text-slate-800">Invoice {invoice.number}</div>
-          <div className="flex flex-wrap items-center gap-2">
+    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col overflow-hidden">
+        <div className="no-print bg-white border-b border-slate-200 px-3.5 py-2.5 sm:px-5 sm:py-3 flex flex-wrap items-center justify-between gap-2 shrink-0 z-10">
+          <div className="font-semibold text-slate-800 text-sm sm:text-base">Invoice {invoice.number}</div>
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <Button variant="secondary" size="sm" onClick={handlePrint}>
               <Printer className="w-4 h-4" /> <span className="hidden sm:inline">Print</span>
             </Button>
@@ -128,7 +128,7 @@ const InvoicePrint: React.FC<{ invoice: Invoice; onClose: () => void }> = ({ inv
                 onClick={handleWhatsApp}
                 disabled={busy === "wa"}
                 title={invoice.patientPhone ? `Send to ${prettyPhone(invoice.patientPhone)}` : "No phone on invoice — you'll pick the contact in WhatsApp"}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold text-white bg-[#25D366] hover:bg-[#1ebe5b] active:scale-95 disabled:opacity-60 transition-all"
+                className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold text-white bg-[#25D366] hover:bg-[#1ebe5b] active:scale-95 disabled:opacity-60 transition-all"
               >
                 {busy === "wa" ? spin : <MessageCircle className="w-4 h-4" />}
                 <span className="hidden sm:inline">Share on WhatsApp</span>
@@ -141,130 +141,114 @@ const InvoicePrint: React.FC<{ invoice: Invoice; onClose: () => void }> = ({ inv
           </div>
         </div>
 
-        <div id="print-area" ref={printRef} className="p-8 text-slate-800 bg-white">
-          {/* Header */}
-          <div className="flex items-start justify-between border-b-2 border-sky-600 pb-4 mb-5">
-            <div>
-              <div className="flex items-center gap-3">
-                <img src={logoUrl} alt="Guru logo" className="w-14 h-14 object-contain" />
-                <div>
-                  <h1 className="text-3xl font-extrabold tracking-tight text-sky-700">{profile.name || "GURU"}</h1>
-                  <div className="text-xs text-slate-600">Your trusted pharmacy partner</div>
+        <div className="flex-1 overflow-y-auto">
+          <div id="print-area" ref={printRef} className="p-4 sm:p-8 text-slate-800 bg-white">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4 border-b-2 border-sky-600 pb-4 mb-5">
+              <div>
+                <div className="flex items-center gap-3">
+                  <img src={logoUrl} alt="Guru logo" className="w-12 h-12 sm:w-14 sm:h-14 object-contain" />
+                  <div>
+                    <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-sky-700">{profile.name || "GURU"}</h1>
+                    <div className="text-xs text-slate-600">Your trusted pharmacy partner</div>
+                  </div>
                 </div>
+                {profile.address && (
+                  <div className="text-xs text-slate-600 mt-2 max-w-[320px] leading-relaxed">
+                    <span className="font-semibold text-slate-700 block">Regd. Address:</span>
+                    <div className="whitespace-pre-line">{profile.address}</div>
+                  </div>
+                )}
               </div>
-              {profile.address && (
-                <div className="text-xs text-slate-600 mt-2 max-w-[320px] leading-relaxed">
-                  <span className="font-semibold text-slate-700 block">Regd. Address:</span>
-                  <div className="whitespace-pre-line">{profile.address}</div>
-                </div>
-              )}
-            </div>
-            <div className="text-right text-xs text-slate-600">
-              <div className="font-semibold text-slate-800">TAX INVOICE</div>
-              <div>Phone: {profile.contact || "+91 98765 43210"}</div>
-              {profile.gstNumber ? (
-                <div className="mt-1 font-semibold text-slate-800">GSTIN: {profile.gstNumber}</div>
-              ) : (
-                <div>Email: info@gurupharma.com</div>
-              )}
-            </div>
-          </div>
-
-          {/* Meta */}
-          <div className="grid grid-cols-2 gap-4 mb-5 text-sm">
-            <div className="bg-slate-50 rounded-lg p-3">
-              <div className="text-xs text-slate-500 font-semibold uppercase mb-1">Bill To</div>
-              <div className="font-semibold">{invoice.patientName}</div>
-              {invoice.patientPhone && <div className="text-slate-600">{invoice.patientPhone}</div>}
-              {invoice.doctorName && (
-                <div className="mt-2 pt-2 border-t border-slate-200 text-xs">
-                  <div className="text-[10px] text-slate-400 font-semibold uppercase">Prescribed By</div>
-                  <div className="font-semibold text-slate-700">{invoice.doctorName}</div>
-                  {invoice.hospital && <div className="text-slate-500 text-[11px]">{invoice.hospital}</div>}
-                </div>
-              )}
-            </div>
-            <div className="bg-slate-50 rounded-lg p-3 text-right">
-              <div className="text-xs text-slate-500 font-semibold uppercase mb-1">Invoice Details</div>
-              <div><span className="text-slate-500">No:</span> <span className="font-semibold">{invoice.number}</span></div>
-              <div><span className="text-slate-500">Date:</span> {fmtDateTime(invoice.date)}</div>
-              <div><span className="text-slate-500">Cashier:</span> {invoice.createdBy}</div>
-              <div><span className="text-slate-500">Payment:</span> <span className="font-semibold uppercase">{invoice.paymentMethod || "cash"}</span></div>
-              {invoice.posRef && <div className="text-[10px] text-violet-700 font-semibold">POS Terminal Ref: {invoice.posRef}</div>}
-            </div>
-          </div>
-
-          {/* Narcotic Prescription Record if applicable */}
-          {(invoice.hasNarcotic || invoice.prescriptionUrl) && (
-            <div className="mb-5 rounded-lg border border-rose-300 bg-rose-50/70 p-3 text-xs text-rose-950 flex items-center justify-between">
-              <span className="font-bold text-rose-800 uppercase tracking-wide flex items-center gap-1.5">
-                <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white font-mono text-[10px] font-bold">Rx</span>
-                Narcotic / Schedule Controlled Medication
-              </span>
-              <span className="text-[11px] text-emerald-700 font-semibold bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full">
-                ✓ Prescription Attached & Verified
-              </span>
-            </div>
-          )}
-
-          {/* Items */}
-          <table className="w-full text-sm border-collapse mb-5">
-            <thead>
-              <tr className="bg-sky-600 text-white">
-                <th className="px-3 py-2 text-left">#</th>
-                <th className="px-3 py-2 text-left">Medicine</th>
-                <th className="px-3 py-2 text-left">Batch</th>
-                <th className="px-3 py-2 text-left">Expiry Date</th>
-                <th className="px-3 py-2 text-left">GST %</th>
-                <th className="px-3 py-2 text-right">Qty</th>
-                <th className="px-3 py-2 text-right">Price</th>
-                <th className="px-3 py-2 text-right">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoice.items.map((it, i) => (
-                <tr key={i} className={`border-b border-slate-200 ${it.narcotic ? "bg-rose-50/50" : ""}`}>
-                  <td className="px-3 py-2">{i + 1}</td>
-                  <td className="px-3 py-2 font-medium">
-                    {it.name}
-                    {it.narcotic && (
-                      <span className="ml-1.5 inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-300">
-                        NARCOTIC
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-slate-600">{it.batch}</td>
-                  <td className="px-3 py-2 text-slate-600">{it.expiry || "—"}</td>
-                  <td className="px-3 py-2 text-slate-600">{it.gst != null ? `${it.gst}%` : "0%"}</td>
-                  <td className="px-3 py-2 text-right">{it.qty}</td>
-                  <td className="px-3 py-2 text-right">{fmtCurrency(it.price)}</td>
-                  <td className="px-3 py-2 text-right font-semibold">{fmtCurrency(it.qty * it.price)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {/* Totals */}
-          <div className="flex justify-end">
-            <div className="w-full max-w-xs space-y-1 text-sm">
-              <div className="flex justify-between"><span>Subtotal</span><span>{fmtCurrency(invoice.subtotal)}</span></div>
-              {invoice.discount > 0 && (
-                <div className="flex justify-between text-rose-600">
-                  <span>Discount ({invoice.discountType === "percent" ? `${invoice.discountValue}%` : "fixed"})</span>
-                  <span>- {fmtCurrency(invoice.discount)}</span>
-                </div>
-              )}
-              <div className="flex justify-between text-lg font-bold border-t-2 border-slate-300 pt-2 mt-1">
-                <span>Grand Total</span>
-                <span className="text-sky-700">{fmtCurrency(invoice.total)}</span>
+              <div className="text-left sm:text-right text-xs text-slate-600">
+                <div className="font-semibold text-slate-800">TAX INVOICE</div>
+                <div>Phone: {profile.contact || "+91 98765 43210"}</div>
+                {profile.gstNumber ? (
+                  <div className="mt-1 font-semibold text-slate-800">GSTIN: {profile.gstNumber}</div>
+                ) : (
+                  <div>Email: info@gurupharma.com</div>
+                )}
               </div>
-              <div className="text-[11px] text-slate-400 text-right italic">(Inclusive of all taxes / GST)</div>
             </div>
-          </div>
 
-          <div className="mt-8 pt-4 border-t border-slate-200 text-center text-xs text-slate-500">
-            Thank you for choosing Guru. Get well soon! 💊<br />
-            <span className="text-[10px]">This is a computer-generated invoice and does not require a signature.</span>
+            {/* Meta */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mb-5 text-sm">
+              <div className="bg-slate-50 rounded-lg p-3">
+                <div className="text-xs text-slate-500 font-semibold uppercase mb-1">Bill To</div>
+                <div className="font-semibold">{invoice.patientName}</div>
+                {invoice.patientPhone && <div className="text-slate-600">{invoice.patientPhone}</div>}
+                {invoice.doctorName && (
+                  <div className="mt-2 pt-2 border-t border-slate-200 text-xs">
+                    <div className="text-[10px] text-slate-400 font-semibold uppercase">Prescribed By</div>
+                    <div className="font-semibold text-slate-700">{invoice.doctorName}</div>
+                    {invoice.hospital && <div className="text-slate-500 text-[11px]">{invoice.hospital}</div>}
+                  </div>
+                )}
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 text-left sm:text-right">
+                <div className="text-xs text-slate-500 font-semibold uppercase mb-1">Invoice Details</div>
+                <div><span className="text-slate-500">No:</span> <span className="font-semibold">{invoice.number}</span></div>
+                <div><span className="text-slate-500">Date:</span> {fmtDateTime(invoice.date)}</div>
+                <div><span className="text-slate-500">Cashier:</span> {invoice.createdBy}</div>
+                <div><span className="text-slate-500">Payment:</span> <span className="font-semibold uppercase">{invoice.paymentMethod || "cash"}</span></div>
+                {invoice.posRef && <div className="text-[10px] text-violet-700 font-semibold">POS Terminal Ref: {invoice.posRef}</div>}
+              </div>
+            </div>
+
+            {/* Items */}
+            <div className="overflow-x-auto mb-5 -mx-1 px-1 sm:mx-0 sm:px-0">
+              <table className="w-full text-sm border-collapse min-w-[540px] sm:min-w-full">
+                <thead>
+                  <tr className="bg-sky-600 text-white">
+                    <th className="px-3 py-2 text-left">#</th>
+                    <th className="px-3 py-2 text-left">Medicine</th>
+                    <th className="px-3 py-2 text-left">Batch</th>
+                    <th className="px-3 py-2 text-left">Expiry Date</th>
+                    <th className="px-3 py-2 text-left">GST %</th>
+                    <th className="px-3 py-2 text-right">Qty</th>
+                    <th className="px-3 py-2 text-right">Price</th>
+                    <th className="px-3 py-2 text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoice.items.map((it, i) => (
+                    <tr key={i} className="border-b border-slate-200">
+                      <td className="px-3 py-2">{i + 1}</td>
+                      <td className="px-3 py-2 font-medium">{it.name}</td>
+                      <td className="px-3 py-2 text-slate-600">{it.batch}</td>
+                      <td className="px-3 py-2 text-slate-600">{it.expiry || "—"}</td>
+                      <td className="px-3 py-2 text-slate-600">{it.gst != null ? `${it.gst}%` : "0%"}</td>
+                      <td className="px-3 py-2 text-right">{it.qty}</td>
+                      <td className="px-3 py-2 text-right">{fmtCurrency(it.price)}</td>
+                      <td className="px-3 py-2 text-right font-semibold">{fmtCurrency(it.qty * it.price)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Totals */}
+            <div className="flex justify-end">
+              <div className="w-full sm:max-w-xs space-y-1 text-sm">
+                <div className="flex justify-between"><span>Subtotal</span><span>{fmtCurrency(invoice.subtotal)}</span></div>
+                {invoice.discount > 0 && (
+                  <div className="flex justify-between text-rose-600">
+                    <span>Discount ({invoice.discountType === "percent" ? `${invoice.discountValue}%` : "fixed"})</span>
+                    <span>- {fmtCurrency(invoice.discount)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-lg font-bold border-t-2 border-slate-300 pt-2 mt-1">
+                  <span>Grand Total</span>
+                  <span className="text-sky-700">{fmtCurrency(invoice.total)}</span>
+                </div>
+                <div className="text-[11px] text-slate-400 text-right italic">(Inclusive of all taxes / GST)</div>
+              </div>
+            </div>
+
+            <div className="mt-8 pt-4 border-t border-slate-200 text-center text-xs text-slate-500">
+              Thank you for choosing Guru. Get well soon! 💊<br />
+              <span className="text-[10px]">This is a computer-generated invoice and does not require a signature.</span>
+            </div>
           </div>
         </div>
       </div>
