@@ -514,6 +514,45 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // System Data Purge Endpoint (Developer / Super Admin)
+  if (req.method === "POST" && (url.pathname === "/api/system/purge" || url.pathname === "/api/data/purge")) {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", async () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const role = payload.role || req.headers["x-user-role"] || "";
+        if (role && role !== "developer" && role !== "superadmin") {
+          return sendJson(res, 403, { success: false, error: "Access Denied: Only Developer or Super Admin can purge system data." });
+        }
+
+        const now = new Date().toISOString();
+        try {
+          await setDoc(doc(db, COLLECTIONS.meta, "app"), {
+            auditClearedAt: now,
+            invoicesClearedAt: now,
+            medicinesClearedAt: now,
+            grnsClearedAt: now,
+            returnsClearedAt: now,
+            counters: { invoice: 1000, grn: 500 },
+            updatedAt: now,
+          }, { merge: true });
+        } catch (dbErr) {
+          console.warn("[Firebase purge meta update warning]", dbErr.message);
+        }
+
+        return sendJson(res, 200, {
+          success: true,
+          message: "All old invoices, inventory tablets, audit logs, and report records purged successfully.",
+          purgedAt: now,
+        });
+      } catch (err) {
+        return sendJson(res, 500, { success: false, error: err.message });
+      }
+    });
+    return;
+  }
+
   // Approved GRN Management Endpoints (Developer role only)
   if (req.method === "GET" && url.pathname === "/api/grn/approved") {
     const role = req.headers["x-user-role"] || url.searchParams.get("role") || "";

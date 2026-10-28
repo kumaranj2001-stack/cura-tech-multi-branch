@@ -5,15 +5,9 @@ import { Card, CardBody, Input, Th, Td, EmptyState, Button } from "../components
 import { fmtDateTime, downloadPDF } from "../utils/helpers";
 
 const Audit: React.FC = () => {
-  const { data, setData, flags, flashToast } = useStore();
+  const { data, flags, currentUser, clearAuditLog } = useStore();
   const [q, setQ] = useState("");
-
-  const clearAllAuditLogs = () => {
-    if (window.confirm("Are you sure you want to permanently clear all audit logs?")) {
-      setData((d) => ({ ...d, audit: [] }));
-      flashToast("All audit logs cleared successfully");
-    }
-  };
+  const isOverseerRole = currentUser?.role === "superadmin" || currentUser?.role === "developer";
 
   const branchOf = (id?: string) => data.branches.find((b) => b.id === id)?.code || (id ? "—" : "HQ");
 
@@ -57,9 +51,20 @@ const Audit: React.FC = () => {
       <Card>
         <CardBody className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           <div className="flex-1 flex flex-wrap gap-2 sm:gap-3">
-            <Input placeholder="Search user/action..." value={q} onChange={(e) => setQ(e.target.value)} className="min-w-[180px] flex-1" />
+            <Input placeholder="Search user/action..." value={q} onChange={(e) => setQ(e.target.value)} />
             <Button variant="secondary" onClick={exportPdf}><FileDown className="w-4 h-4" /> Download PDF</Button>
-            <Button variant="danger" onClick={clearAllAuditLogs} title="Clear all audit logs"><Trash2 className="w-4 h-4" /> Clear All Logs</Button>
+            {isOverseerRole && (
+              <Button
+                variant="danger"
+                onClick={() => {
+                  if (window.confirm("Are you sure you want to permanently clear all audit logs?")) {
+                    void clearAuditLog();
+                  }
+                }}
+              >
+                <Trash2 className="w-4 h-4" /> Clear Audit Log
+              </Button>
+            )}
           </div>
           <div className="flex items-center gap-2 shrink-0 text-xs text-slate-500 dark:text-slate-400">
             <span className="font-semibold">Retention:</span>

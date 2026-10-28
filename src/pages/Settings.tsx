@@ -6,7 +6,7 @@ import { downloadJSON, flashToast, compressImageFile } from "../utils/helpers";
 import type { FeatureFlags, StaffPlanLimits } from "../store/types";
 import { isOverseer, STAFF_PLAN_OPTIONS, formatPlanCap, staffPlanLimits, DEFAULT_CUSTOM_STAFF_LIMITS } from "../store/types";
 import { parseBranchBackup } from "../store/store";
-import { FileDown, Upload, Package, Filter, BarChart3, LayoutDashboard, QrCode, Loader2, ShieldCheck, CreditCard, AlertTriangle, Clock, Sliders } from "lucide-react";
+import { FileDown, Upload, Package, Filter, BarChart3, LayoutDashboard, QrCode, Loader2, ShieldCheck, CreditCard, AlertTriangle, Clock, Sliders, Trash2 } from "lucide-react";
 
 const Toggle: React.FC<{ on: boolean; onChange: (v: boolean) => void; label: string; hint?: string; disabled?: boolean }> = ({ on, onChange, label, hint, disabled }) => (
   <button
@@ -354,7 +354,7 @@ service cloud.firestore {
 }`;
 
 const Settings: React.FC = () => {
-  const { data, currentUser, log, cloudReady, cloudSyncing, cloudError, flags, setFlag, setFlagsBatch, staffPlan, setStaffPlan, customStaffPlanLimits, payment, branchPayments, setBranchPayment, buildBranchBackup, restoreBranchBackup } = useStore();
+  const { data, currentUser, log, cloudReady, cloudSyncing, cloudError, flags, setFlag, setFlagsBatch, staffPlan, setStaffPlan, customStaffPlanLimits, payment, branchPayments, setBranchPayment, buildBranchBackup, restoreBranchBackup, purgeAllBusinessData } = useStore();
   const isSuperAdmin = currentUser?.role === "superadmin";
   const isAdmin = currentUser?.role === "admin";
   const isDeveloper = isOverseer(currentUser?.role);
@@ -1298,6 +1298,35 @@ const Settings: React.FC = () => {
           </div>
         </CardBody>
       </Card>
+      )}
+
+      {/* Business Data Reset — developer & superadmin only */}
+      {(currentUser?.role === "developer" || currentUser?.role === "superadmin") && (
+        <Card className="border border-rose-200 dark:border-rose-900 bg-rose-50/30 dark:bg-rose-950/20">
+          <CardBody className="space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="font-semibold text-rose-800 dark:text-rose-200 flex items-center gap-2">
+                  <Trash2 className="w-4 h-4 text-rose-600" /> Purge Business Records
+                </div>
+                <div className="text-xs text-rose-600/80 dark:text-rose-400 mt-0.5">
+                  Reset and permanently wipe all old invoices, inventory tablets & stock, reports data, and audit logs.
+                </div>
+              </div>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => {
+                  if (window.confirm("⚠️ WARNING: This will permanently remove all old invoices, all medicines and stock from inventories, all generated reports, and all audit logs. Users, branches, doctors and patients are preserved. Are you sure you want to proceed?")) {
+                    void purgeAllBusinessData();
+                  }
+                }}
+              >
+                Purge All Records
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
       )}
 
       {/* About */}

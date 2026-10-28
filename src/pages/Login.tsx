@@ -135,20 +135,15 @@ const Login: React.FC = () => {
           </div>
 
           <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl shadow-slate-200/60 dark:shadow-none border border-slate-100 dark:border-slate-700 p-7 rise rise-2">
-            <div className="flex items-center justify-between gap-2 mb-1">
-              <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">Sign in</h2>
-              <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800">
-                Developer Access Only
-              </span>
-            </div>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">Exclusive Developer console login</p>
+            <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">Sign in</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 mb-6">Access your pharmacy console</p>
 
             <form onSubmit={submit} className="space-y-4">
               <div>
                 <Label>Username</Label>
                 <div className="relative">
                   <UserRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-                  <Input className="pl-9" value={u} onChange={(e) => setU(e.target.value)} placeholder="Developer username (guru)" autoFocus required />
+                  <Input className="pl-9" value={u} onChange={(e) => setU(e.target.value)} placeholder="Enter username" autoFocus required />
                 </div>
               </div>
               <div>

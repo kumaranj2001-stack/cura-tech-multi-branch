@@ -268,6 +268,9 @@ const Reports: React.FC = () => {
                   {(result as { date: string; count: number; tax: number; total: number }[]).map((r) => (
                     <tr key={r.date}><Td>{r.date}</Td><Td>{r.count}</Td><Td>{fmtCurrency(r.tax)}</Td><Td className="font-semibold">{fmtCurrency(r.total)}</Td></tr>
                   ))}
+                  {result.length === 0 && (
+                    <tr><td colSpan={4} className="text-center py-8 text-slate-400">No sales records found</td></tr>
+                  )}
                 </tbody>
               </table>
             )}
@@ -279,6 +282,9 @@ const Reports: React.FC = () => {
                   {(result as { id: string; number: string; date: string; supplierName: string; items: unknown[]; total: number }[]).map((g) => (
                     <tr key={g.id}><Td>{g.number}</Td><Td>{fmtDate(g.date)}</Td><Td>{g.supplierName}</Td><Td>{g.items.length}</Td><Td className="font-semibold">{fmtCurrency(g.total)}</Td></tr>
                   ))}
+                  {result.length === 0 && (
+                    <tr><td colSpan={5} className="text-center py-8 text-slate-400">No purchase records found</td></tr>
+                  )}
                 </tbody>
               </table>
             )}
@@ -296,6 +302,9 @@ const Reports: React.FC = () => {
                       </tr>
                     );
                   })}
+                  {result.length === 0 && (
+                    <tr><td colSpan={7} className="text-center py-8 text-slate-400">No inventory records found</td></tr>
+                  )}
                 </tbody>
               </table>
             )}

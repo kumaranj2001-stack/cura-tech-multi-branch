@@ -13,9 +13,9 @@ import { flashToast } from "../utils/helpers";
 import type { AppData, AuditLog, Branch, Doctor, FeatureFlags, GRN, Invoice, Medicine, Patient, PaymentSettings, ReturnEntry, StaffPlanLimits, StaffPlanTier, Supplier, User } from "./types";
 import { DEFAULT_CUSTOM_STAFF_LIMITS, DEFAULT_FEATURE_FLAGS, DEFAULT_STAFF_PLAN, isStaffPlanTier, planAllowsMultiBranch, getAuditRetentionMs } from "./types";
 
-const DATA_KEY = "guru_pharma_data_v4";
-const SESSION_KEY = "guru_pharma_session_v4";
-const BRANCH_SESSION_KEY = "guru_pharma_session_branch_v4";
+const DATA_KEY = "guru_pharma_data_v3";
+const SESSION_KEY = "guru_pharma_session_v3";
+const BRANCH_SESSION_KEY = "guru_pharma_session_branch_v3";
 
 const COLLECTIONS = {
   branches: "gp_branches",
@@ -50,6 +50,35 @@ const defaultUsers: User[] = [
     password: "kumaran",
     name: "Developer",
     role: "developer",
+    active: true,
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: "u_super",
+    username: "super",
+    password: "admin",
+    name: "Super Admin",
+    role: "superadmin",
+    active: true,
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: "u_admin",
+    username: "kumaran",
+    password: "kumaranjkms",
+    name: "Kumaran (Admin)",
+    role: "admin",
+    branchId: "br_main",
+    active: true,
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: "u_staff",
+    username: "staff123",
+    password: "kumaranjk",
+    name: "Pharmacy Staff",
+    role: "staff",
+    branchId: "br_main",
     active: true,
     createdAt: new Date().toISOString(),
   },
@@ -112,20 +141,11 @@ function saveLocalData(data: AppData) {
 }
 
 function ensureDefaults(data: AppData): AppData {
-  // Only Developer accounts are preserved; filter out admin, superadmin, and staff
-  const devUsers = (data.users || [])
-    .filter((u) => u.role === "developer" || u.username === "guru")
-    .map((u) => (u.role === "developer" ? u : { ...u, role: "developer" as const, name: "Developer" }));
-
-  defaultUsers.forEach((user) => {
-    if (!devUsers.find((u) => u.username === user.username)) devUsers.push(user);
-  });
-
   const next: AppData = {
     ...seedData(),
     ...data,
     branches: [...(data.branches || [])],
-    users: devUsers,
+    users: [...(data.users || [])],
     medicines: [...(data.medicines || [])],
     patients: [...(data.patients || [])],
     doctors: [...(data.doctors || defaultDoctors)].map((d) => (d.branchId ? d : { ...d, branchId: starterBranch.id })),
@@ -138,11 +158,45 @@ function ensureDefaults(data: AppData): AppData {
   };
 
   if (!next.branches.find((b) => b.id === starterBranch.id)) next.branches.unshift(starterBranch);
+  defaultUsers.forEach((user) => {
+    if (!next.users.find((u) => u.username === user.username)) next.users.push(user);
+  });
+  // The owner account is always the Developer — the only role that can create Super Admins
+  const guru = next.users.find((u) => u.username === "guru");
+  if (guru && guru.role !== "developer") {
+    guru.role = "developer";
+    guru.name = "Developer";
+  }
   return next;
 }
 
+const DATA_PURGED_MARKER = "gp_purged_data_v3_20261028";
+
 function initialData(): AppData {
-  return ensureDefaults(getLocalData() || seedData());
+  const local = getLocalData();
+  const wasPurged = typeof window !== "undefined" && localStorage.getItem(DATA_PURGED_MARKER);
+  if (!wasPurged && typeof window !== "undefined") {
+    try {
+      localStorage.setItem(DATA_PURGED_MARKER, new Date().toISOString());
+      const clean = seedData();
+      if (local) {
+        clean.branches = local.branches && local.branches.length > 0 ? local.branches : clean.branches;
+        clean.users = local.users && local.users.length > 0 ? local.users : clean.users;
+        clean.patients = local.patients || [];
+        clean.doctors = local.doctors && local.doctors.length > 0 ? local.doctors : clean.doctors;
+        clean.suppliers = local.suppliers || [];
+      }
+      clean.medicines = [];
+      clean.invoices = [];
+      clean.audit = [];
+      clean.grns = [];
+      clean.returns = [];
+      clean.counters = { invoice: 1000, grn: 500 };
+      saveLocalData(clean);
+      return ensureDefaults(clean);
+    } catch {}
+  }
+  return ensureDefaults(local || seedData());
 }
 
 /* ── Branch isolation engine ─────────────────────────────────────────────
@@ -318,18 +372,55 @@ function sortByDateDesc<T extends { date?: string; createdAt?: string; timestamp
   });
 }
 
-function normalizeCloudData(slices: Partial<FirestoreSlices>, counters: AppData["counters"] | null): AppData {
+export interface CloudCutoffs {
+  auditClearedAt?: string | null;
+  invoicesClearedAt?: string | null;
+  medicinesClearedAt?: string | null;
+  grnsClearedAt?: string | null;
+  returnsClearedAt?: string | null;
+}
+
+function normalizeCloudData(
+  slices: Partial<FirestoreSlices>,
+  counters: AppData["counters"] | null,
+  cutoffs?: CloudCutoffs
+): AppData {
+  const allAudit = sortByDateDesc((slices.audit || []) as AuditLog[]);
+  const audit = cutoffs?.auditClearedAt
+    ? allAudit.filter((a) => a.timestamp > cutoffs.auditClearedAt!)
+    : allAudit;
+
+  const allInvoices = sortByDateDesc((slices.invoices || []) as Invoice[]);
+  const invoices = cutoffs?.invoicesClearedAt
+    ? allInvoices.filter((i) => i.date > cutoffs.invoicesClearedAt!)
+    : allInvoices;
+
+  const allMedicines = [...((slices.medicines || []) as Medicine[])].sort((a, b) => a.name.localeCompare(b.name));
+  const medicines = cutoffs?.medicinesClearedAt
+    ? allMedicines.filter((m) => Boolean(m.createdAt && m.createdAt > cutoffs.medicinesClearedAt!))
+    : allMedicines;
+
+  const allGrns = sortByDateDesc((slices.grns || []) as GRN[]);
+  const grns = cutoffs?.grnsClearedAt
+    ? allGrns.filter((g) => Boolean(g.date && g.date > cutoffs.grnsClearedAt!))
+    : allGrns;
+
+  const allReturns = sortByDateDesc((slices.returns || []) as ReturnEntry[]);
+  const returns = cutoffs?.returnsClearedAt
+    ? allReturns.filter((r) => Boolean(r.date && r.date > cutoffs.returnsClearedAt!))
+    : allReturns;
+
   return ensureDefaults({
     branches: sortByDateDesc((slices.branches || []) as Branch[]),
     users: sortByDateDesc((slices.users || []) as User[]),
-    medicines: [...((slices.medicines || []) as Medicine[])].sort((a, b) => a.name.localeCompare(b.name)),
+    medicines,
     patients: sortByDateDesc((slices.patients || []) as Patient[]),
     doctors: sortByDateDesc((slices.doctors || []) as Doctor[]),
-    invoices: sortByDateDesc((slices.invoices || []) as Invoice[]),
+    invoices,
     suppliers: [...((slices.suppliers || []) as Supplier[])].sort((a, b) => a.name.localeCompare(b.name)),
-    grns: sortByDateDesc((slices.grns || []) as GRN[]),
-    returns: sortByDateDesc((slices.returns || []) as ReturnEntry[]),
-    audit: sortByDateDesc((slices.audit || []) as AuditLog[]),
+    grns,
+    returns,
+    audit,
     counters: counters || { invoice: 1000, grn: 500 },
   });
 }
@@ -349,7 +440,10 @@ async function syncCollection<K extends EntityKey>(collectionName: string, prevI
 
   for (const [id] of prevMap.entries()) {
     if (!nextMap.has(id)) {
-      operations.push({ type: "delete", id });
+      // Security rules prohibit deleting from append-only audit trail
+      if (collectionName !== COLLECTIONS.audit) {
+        operations.push({ type: "delete", id });
+      }
     }
   }
 
@@ -441,6 +535,8 @@ interface StoreCtx {
   cloudError: string;
   buildBranchBackup: (branchId: string) => BranchBackupFile;
   restoreBranchBackup: (branchId: string, incoming: AppData, extras?: { payment?: PaymentSettings; profile?: import("./types").StoreProfile }) => void;
+  clearAuditLog: () => Promise<void>;
+  purgeAllBusinessData: () => Promise<void>;
 }
 
 const Ctx = createContext<StoreCtx | null>(null);
@@ -450,14 +546,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
       const raw = sessionStorage.getItem(SESSION_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as User;
-      if (parsed.role !== "developer") {
-        sessionStorage.removeItem(SESSION_KEY);
-        sessionStorage.removeItem(BRANCH_SESSION_KEY);
-        return null;
-      }
-      return parsed;
+      return raw ? (JSON.parse(raw) as User) : null;
     } catch {
       return null;
     }
@@ -825,20 +914,30 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const login = useCallback((username: string, password: string) => {
     const allUsers = fullDataRef.current.users;
-    const user = allUsers.find((x) => x.username.trim().toLowerCase() === username.trim().toLowerCase());
+    const user = allUsers.find((x) => x.username === username.trim());
     if (!cloudReady && allUsers.length === 0) return { ok: false, message: "Connecting to cloud data. Please wait..." };
     if (!user) return { ok: false, message: "User not found" };
-    if (!user.active) return { ok: false, message: "Account is deactivated." };
+    if (!user.active) return { ok: false, message: "Account is deactivated. Contact admin." };
     if (user.password !== password) return { ok: false, message: "Incorrect password" };
-    if (user.role !== "developer") return { ok: false, message: "Access restricted: Only Developer access is permitted." };
 
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
     setCurrentUser(user);
-    setCurrentBranch(null);
-    setViewBranchId(null);
-    sessionStorage.removeItem(BRANCH_SESSION_KEY);
 
-    log("LOGIN", `Developer ${user.username} logged in`);
+    if (user.role !== "developer" && user.role !== "superadmin") {
+      const branch = user.branchId ? fullDataRef.current.branches.find((b) => b.id === user.branchId) : undefined;
+      if (!branch) {
+        sessionStorage.removeItem(SESSION_KEY);
+        return { ok: false, message: "No branch is assigned to your account. Contact the Super Admin." };
+      }
+      setCurrentBranch(branch);
+      sessionStorage.setItem(BRANCH_SESSION_KEY, JSON.stringify(branch));
+    } else {
+      setCurrentBranch(null);
+      setViewBranchId(null);
+      sessionStorage.removeItem(BRANCH_SESSION_KEY);
+    }
+
+    log("LOGIN", `${user.role} logged in`);
     return { ok: true };
   }, [cloudReady, log]);
 
@@ -863,6 +962,48 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setViewBranchId(null);
   }, [applyUpdate]);
 
+  const clearAuditLog = useCallback(async () => {
+    const now = new Date().toISOString();
+    applyUpdate((prev) => ({ ...prev, audit: [] }));
+    if (db) {
+      try {
+        await setDoc(doc(db, COLLECTIONS.meta, "app"), { auditClearedAt: now, updatedAt: now }, { merge: true });
+      } catch (err) {
+        console.warn("[clearAuditLog error]", err);
+      }
+    }
+    flashToast("Audit log cleared", "ok");
+  }, [applyUpdate]);
+
+  const purgeAllBusinessData = useCallback(async () => {
+    const now = new Date().toISOString();
+    applyUpdate((prev) => ({
+      ...prev,
+      invoices: [],
+      medicines: [],
+      audit: [],
+      grns: [],
+      returns: [],
+      counters: { invoice: 1000, grn: 500 },
+    }));
+    if (db) {
+      try {
+        await setDoc(doc(db, COLLECTIONS.meta, "app"), {
+          auditClearedAt: now,
+          invoicesClearedAt: now,
+          medicinesClearedAt: now,
+          grnsClearedAt: now,
+          returnsClearedAt: now,
+          counters: { invoice: 1000, grn: 500 },
+          updatedAt: now,
+        }, { merge: true });
+      } catch (err) {
+        console.warn("[purgeAllBusinessData error]", err);
+      }
+    }
+    flashToast("All old invoices, inventory, reports & audit logs purged", "ok");
+  }, [applyUpdate]);
+
   useEffect(() => {
     let disposed = false;
     if (!db) {
@@ -872,6 +1013,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const localSeed = initialData();
     const slices: Partial<FirestoreSlices> = {};
     let counters: AppData["counters"] | null = null;
+    let cutoffs: CloudCutoffs = {};
     let metaReady = false;
     const loaded = new Set<string>();
 
@@ -879,7 +1021,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (disposed) return;
       if (!metaReady) return;
       if (ENTITY_KEYS.some((key) => !loaded.has(key))) return;
-      const next = normalizeCloudData(slices, counters);
+      const next = normalizeCloudData(slices, counters, cutoffs);
       setDataRaw(next);
       saveLocalData(next);
       fullDataRef.current = next;
@@ -907,6 +1049,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       (snapshot) => {
         counters = snapshot.exists() ? ((snapshot.data().counters as AppData["counters"]) || { invoice: 1000, grn: 500 }) : null;
         if (snapshot.exists()) {
+          const mdata = snapshot.data();
+          cutoffs = {
+            auditClearedAt: (mdata?.auditClearedAt as string) || null,
+            invoicesClearedAt: (mdata?.invoicesClearedAt as string) || null,
+            medicinesClearedAt: (mdata?.medicinesClearedAt as string) || null,
+            grnsClearedAt: (mdata?.grnsClearedAt as string) || null,
+            returnsClearedAt: (mdata?.returnsClearedAt as string) || null,
+          };
           const ff = snapshot.data().featureFlags as Partial<FeatureFlags> | undefined;
           if (ff) setFlags({ ...DEFAULT_FEATURE_FLAGS, ...ff });
           if (isStaffPlanTier(snapshot.data().staffPlan)) {
@@ -997,28 +1147,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [currentUser, currentBranch, fullData.users, fullData.branches]);
 
-  // One-time comprehensive cleanup: purge all old invoices, inventory tablets & details, audit logs, grns, returns, and all non-developer accounts
+  // One-time cleanup: remove the legacy "jk" test super-admin (requested removal).
+  // Runs once per device; the resulting sync deletes the record from Firebase too.
   useEffect(() => {
-    const WIPE_KEY = "gp_wipe_invoices_medicines_audit_developer_v4";
-    if (localStorage.getItem(WIPE_KEY)) return;
-    localStorage.setItem(WIPE_KEY, "1");
-    try {
-      localStorage.removeItem("guru_pharma_data_v3");
-      localStorage.removeItem("guru_pharma_data_v2");
-      localStorage.removeItem("guru_pharma_data_v1");
-      sessionStorage.removeItem("guru_pharma_session_v3");
-      sessionStorage.removeItem("guru_pharma_session_branch_v3");
-    } catch {}
-    setData((d) => ({
-      ...d,
-      medicines: [],
-      invoices: [],
-      audit: [],
-      grns: [],
-      returns: [],
-      users: defaultUsers,
-      counters: { invoice: 1000, grn: 500 },
-    }));
+    if (localStorage.getItem("gp_removed_jk")) return;
+    localStorage.setItem("gp_removed_jk", "1");
+    if (fullDataRef.current.users.some((u) => u.username === "jk")) {
+      setData((d) => ({ ...d, users: d.users.filter((u) => u.username !== "jk") }));
+    }
   }, [setData]);
 
   const value = useMemo<StoreCtx>(() => ({
@@ -1050,7 +1186,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     cloudError,
     buildBranchBackup,
     restoreBranchBackup,
-  }), [data, setData, currentUser, currentBranch, viewBranchId, setViewBranchIdGuarded, flags, setFlag, setFlagsBatch, staffPlan, setStaffPlan, customStaffPlanLimits, setCustomStaffPlanLimits, payment, branchPayments, branchProfiles, login, logout, log, cloudReady, cloudSyncing, cloudError, buildBranchBackup, restoreBranchBackup]);
+    clearAuditLog,
+    purgeAllBusinessData,
+  }), [data, setData, currentUser, currentBranch, viewBranchId, setViewBranchIdGuarded, flags, setFlag, setFlagsBatch, staffPlan, setStaffPlan, customStaffPlanLimits, setCustomStaffPlanLimits, payment, branchPayments, branchProfiles, login, logout, log, cloudReady, cloudSyncing, cloudError, buildBranchBackup, restoreBranchBackup, clearAuditLog, purgeAllBusinessData]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 };
