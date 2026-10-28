@@ -5,6 +5,7 @@ import { filterMedicines } from "./inventoryFilter.mjs";
 import { validateMedicinePayload, createMedicine, updateMedicine, deleteMedicine, updateMedicineMinStock, isAuthorizedForMinStock } from "./medicineHandler.mjs";
 import { listApprovedGrns, updateApprovedGrn, deleteApprovedGrn, isDeveloperRole } from "./approvedGrnHandler.mjs";
 import { listDoctors, createDoctor, updateDoctor, deleteDoctor } from "./doctorHandler.mjs";
+import { listUsers, createUser, updateUser, deleteUser, validateUserPayload } from "./userHandler.mjs";
 import { db, COLLECTIONS, firebaseConfig } from "./firebase.mjs";
 import { collection, doc, getDoc, getDocs, setDoc, deleteDoc } from "firebase/firestore";
 
@@ -12,8 +13,8 @@ const PORT = process.env.PORT || 3001;
 
 function setCorsHeaders(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, x-user-role");
 }
 
 function sendJson(res, statusCode, data) {
@@ -809,6 +810,155 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, result);
       } catch (err) {
         return sendJson(res, 400, { success: false, error: err.message });
+      }
+    });
+    return;
+  }
+
+  // User Management Endpoints
+  if (req.method === "GET" && url.pathname === "/api/users") {
+    const q = url.searchParams.get("q") || url.searchParams.get("search") || "";
+    const branchId = url.searchParams.get("branchId") || "";
+    const role = url.searchParams.get("role") || "";
+    try {
+      const snap = await getDocs(collection(db, COLLECTIONS.users));
+      const firestoreDocs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const result = listUsers(firestoreDocs, { q, branchId, role });
+      return sendJson(res, 200, {
+        success: true,
+        source: "firestore",
+        count: result.length,
+        users: result,
+      });
+    } catch (err) {
+      return sendJson(res, 200, {
+        success: true,
+        source: "local",
+        count: 0,
+        users: [],
+        warning: err.message,
+      });
+    }
+  }
+
+  if (req.method === "POST" && (url.pathname === "/api/users" || url.pathname === "/api/users/create")) {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 10 * 1024 * 1024) req.destroy();
+    });
+
+    req.on("end", async () => {
+      try {
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        const payload = JSON.parse(body);
+        let existingUsers = payload.users || [];
+        if (!existingUsers || existingUsers.length === 0) {
+          try {
+            const snap = await getDocs(collection(db, COLLECTIONS.users));
+            existingUsers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          } catch {}
+        }
+
+        const result = createUser(payload.user || payload, existingUsers);
+
+        // Store to Firestore gp_users
+        try {
+          const docData = {};
+          for (const [k, v] of Object.entries(result.user)) {
+            if (v !== undefined) docData[k] = v;
+          }
+          await setDoc(doc(db, COLLECTIONS.users, result.user.id), docData);
+        } catch (dbErr) {
+          console.warn("[Firebase user save warning]", dbErr.message);
+        }
+
+        return sendJson(res, 201, result);
+      } catch (err) {
+        return sendJson(res, err.statusCode || 400, { success: false, error: err.message });
+      }
+    });
+    return;
+  }
+
+  if ((req.method === "PUT" && url.pathname.startsWith("/api/users/")) || (req.method === "POST" && url.pathname === "/api/users/update")) {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 10 * 1024 * 1024) req.destroy();
+    });
+
+    req.on("end", async () => {
+      try {
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        const payload = JSON.parse(body);
+        const urlId = url.pathname.startsWith("/api/users/") && url.pathname !== "/api/users/update"
+          ? url.pathname.replace("/api/users/", "")
+          : null;
+        const id = payload.id || urlId;
+        let existingUsers = payload.users || [];
+        if (!existingUsers || existingUsers.length === 0) {
+          try {
+            const snap = await getDocs(collection(db, COLLECTIONS.users));
+            existingUsers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          } catch {}
+        }
+
+        const result = updateUser(id, payload.patch || payload, existingUsers);
+
+        // Update in Firestore gp_users
+        try {
+          const docData = {};
+          for (const [k, v] of Object.entries(result.user)) {
+            if (v !== undefined) docData[k] = v;
+          }
+          await setDoc(doc(db, COLLECTIONS.users, result.user.id), docData, { merge: true });
+        } catch (dbErr) {
+          console.warn("[Firebase user update warning]", dbErr.message);
+        }
+
+        return sendJson(res, 200, result);
+      } catch (err) {
+        return sendJson(res, err.statusCode || 400, { success: false, error: err.message });
+      }
+    });
+    return;
+  }
+
+  if ((req.method === "DELETE" && url.pathname.startsWith("/api/users/")) || (req.method === "POST" && url.pathname === "/api/users/delete")) {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 10 * 1024 * 1024) req.destroy();
+    });
+
+    req.on("end", async () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const urlId = url.pathname.startsWith("/api/users/") && url.pathname !== "/api/users/delete"
+          ? url.pathname.replace("/api/users/", "")
+          : null;
+        const id = payload.id || urlId;
+        let existingUsers = payload.users || [];
+        if (!existingUsers || existingUsers.length === 0) {
+          try {
+            const snap = await getDocs(collection(db, COLLECTIONS.users));
+            existingUsers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          } catch {}
+        }
+
+        const result = deleteUser(id, existingUsers);
+
+        // Delete from Firestore gp_users
+        try {
+          await deleteDoc(doc(db, COLLECTIONS.users, id));
+        } catch (dbErr) {
+          console.warn("[Firebase user delete warning]", dbErr.message);
+        }
+
+        return sendJson(res, 200, result);
+      } catch (err) {
+        return sendJson(res, err.statusCode || 400, { success: false, error: err.message });
       }
     });
     return;

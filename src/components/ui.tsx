@@ -16,7 +16,7 @@ export const CardBody: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({ class
 
 export const Button: React.FC<
   React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "danger" | "ghost" | "success"; size?: "sm" | "md" }
-> = ({ className, variant = "primary", size = "md", ...p }) => {
+> = ({ className, variant = "primary", size = "md", type = "button", ...p }) => {
   const v = {
     primary: "bg-sky-600 hover:bg-sky-700 text-white",
     secondary: "bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-600",
@@ -27,6 +27,7 @@ export const Button: React.FC<
   const s = size === "sm" ? "px-3 py-1.5 text-sm" : "px-4 py-2 text-sm";
   return (
     <button
+      type={type}
       className={cn("inline-flex items-center justify-center gap-2 rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed", v, s, className)}
       {...p}
     />

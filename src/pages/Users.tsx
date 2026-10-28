@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { useStore, uid } from "../store/store";
+import { useStore } from "../store/store";
 import { Card, CardBody, Input, PasswordInput, Label, Button, Modal, Badge, Select, EmptyState } from "../components/ui";
 import { fmtDate } from "../utils/helpers";
 import { sanitizeText, sanitizeUsername, sanitizePassword } from "../utils/security";
@@ -7,9 +7,10 @@ import type { User, UserRole } from "../store/types";
 import { isOverseer, canCreateAccount, formatPlanCap, staffPlanLimits } from "../store/types";
 
 const Users: React.FC = () => {
-  const { data, setData, currentUser, currentBranch, log, staffPlan, customStaffPlanLimits } = useStore();
+  const { data, currentUser, currentBranch, log, staffPlan, customStaffPlanLimits, createUser, updateUser, deleteUser, flashToast } = useStore();
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<User | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState<{ username: string; password: string; name: string; role: UserRole; branchId: string; active: boolean }>({
     username: "",
     password: "",
@@ -103,11 +104,12 @@ const Users: React.FC = () => {
     setOpen(true);
   };
 
-  const save = () => {
+  const save = async () => {
     const trimmedUsername = sanitizeUsername(form.username);
     const trimmedPassword = sanitizePassword(form.password).trim();
     const trimmedName = sanitizeText(form.name, 80);
     if (!trimmedUsername || !trimmedPassword || !trimmedName) return alert("All fields required");
+    if (trimmedUsername.length < 2) return alert("Username must be at least 2 characters");
     if (trimmedPassword.length < 4) return alert("Password must be at least 4 characters");
 
     // Overseer roles (Developer / Super Admin) span all branches — no branch needed
@@ -118,44 +120,68 @@ const Users: React.FC = () => {
     const targetBranchId = overseerTarget ? undefined : isDeveloper ? form.branchId : myBranchId;
     const cleanForm = { ...form, username: trimmedUsername, password: trimmedPassword, name: trimmedName, branchId: targetBranchId };
 
-    if (edit) {
-      if (currentUser?.role === "admin" && edit.role !== "staff") {
-        alert("Admins can only edit Staff accounts. Contact the Super Admin or Developer.");
-        return;
-      }
-      if (protectedFromMe(edit)) {
-        alert("Only the Developer can manage Developer and Super Admin accounts.");
-        return;
-      }
-      if (cleanForm.role !== edit.role) {
-        const quota = canCreateAccount(data.users, cleanForm.role, staffPlan, edit.id, customStaffPlanLimits);
-        if (!quota.ok) return alert(quota.message);
-      }
-      if (isOverseer(edit.role) && !isDev) {
-        // Non-developer overseers can't change another overseer's role/branch
-        setData((d) => ({ ...d, users: d.users.map((u) => (u.id === edit.id ? { ...u, name: cleanForm.name, password: cleanForm.password, active: cleanForm.active } : u)) }));
-      } else if (currentUser?.role === "admin") {
-        // Admin edits keep the staff member in their existing branch
-        setData((d) => ({ ...d, users: d.users.map((u) => (u.id === edit.id ? { ...u, username: cleanForm.username, password: cleanForm.password, name: cleanForm.name, active: cleanForm.active } : u)) }));
+    try {
+      setSubmitting(true);
+      if (edit) {
+        if (currentUser?.role === "admin" && edit.role !== "staff") {
+          alert("Admins can only edit Staff accounts. Contact the Super Admin or Developer.");
+          return;
+        }
+        if (protectedFromMe(edit)) {
+          alert("Only the Developer can manage Developer and Super Admin accounts.");
+          return;
+        }
+        if (cleanForm.role !== edit.role) {
+          const quota = canCreateAccount(data.users, cleanForm.role, staffPlan, edit.id, customStaffPlanLimits);
+          if (!quota.ok) return alert(quota.message);
+        }
+
+        // Duplicate username check
+        if (cleanForm.username.toLowerCase() !== edit.username.toLowerCase()) {
+          const exists = data.users.some((u) => u.id !== edit.id && u.username.toLowerCase() === cleanForm.username.toLowerCase());
+          if (exists) return alert(`Username "${cleanForm.username}" is already taken`);
+        }
+
+        let updatePayload: Partial<User>;
+        if (isOverseer(edit.role) && !isDev) {
+          // Non-developer overseers can't change another overseer's role/branch
+          updatePayload = { name: cleanForm.name, password: cleanForm.password, active: cleanForm.active };
+        } else if (currentUser?.role === "admin") {
+          // Admin edits keep the staff member in their existing branch
+          updatePayload = { username: cleanForm.username, password: cleanForm.password, name: cleanForm.name, active: cleanForm.active };
+        } else {
+          updatePayload = cleanForm;
+        }
+
+        await updateUser(edit.id, updatePayload);
+        log("USER_UPDATE", `${trimmedUsername} (${branchName(targetBranchId)})`);
+        flashToast("User updated successfully", "ok");
       } else {
-        setData((d) => ({ ...d, users: d.users.map((u) => (u.id === edit.id ? { ...u, ...cleanForm } : u)) }));
+        if (currentUser?.role === "admin" && cleanForm.role !== "staff") {
+          return alert("Admins can only add Staff accounts.");
+        }
+        const quota = canCreateAccount(data.users, cleanForm.role, staffPlan, undefined, customStaffPlanLimits);
+        if (!quota.ok) return alert(quota.message);
+        if (data.users.some((u) => u.username.toLowerCase() === trimmedUsername.toLowerCase())) {
+          return alert(`Username "${trimmedUsername}" is already taken`);
+        }
+
+        await createUser({
+          ...cleanForm,
+          role: cleanForm.role,
+        });
+        log("USER_CREATE", `${trimmedUsername} as ${cleanForm.role} in ${branchName(targetBranchId)}`);
+        flashToast("User created successfully", "ok");
       }
-      log("USER_UPDATE", `${trimmedUsername} (${branchName(targetBranchId)})`);
-    } else {
-      if (currentUser?.role === "admin" && cleanForm.role !== "staff") {
-        return alert("Admins can only add Staff accounts.");
-      }
-      const quota = canCreateAccount(data.users, cleanForm.role, staffPlan, undefined, customStaffPlanLimits);
-      if (!quota.ok) return alert(quota.message);
-      if (data.users.find((u) => u.username === trimmedUsername)) return alert("Username already exists");
-      const nu: User = { id: uid("u"), createdAt: new Date().toISOString(), ...cleanForm, role: cleanForm.role };
-      setData((d) => ({ ...d, users: [nu, ...d.users] }));
-      log("USER_CREATE", `${trimmedUsername} as ${cleanForm.role} in ${branchName(targetBranchId)}`);
+      setOpen(false);
+    } catch (err: any) {
+      alert(err.message || "Failed to save user");
+    } finally {
+      setSubmitting(false);
     }
-    setOpen(false);
   };
 
-  const toggleActive = (u: User) => {
+  const toggleActive = async (u: User) => {
     if (currentUser?.role === "admin" && u.role !== "staff") {
       alert("Admins can only deactivate Staff accounts.");
       return;
@@ -168,11 +194,16 @@ const Users: React.FC = () => {
       alert("Cannot deactivate your own account");
       return;
     }
-    setData((d) => ({ ...d, users: d.users.map((x) => (x.id === u.id ? { ...x, active: !x.active } : x)) }));
-    log(u.active ? "USER_DEACTIVATE" : "USER_ACTIVATE", u.username);
+    try {
+      await updateUser(u.id, { active: !u.active });
+      log(u.active ? "USER_DEACTIVATE" : "USER_ACTIVATE", u.username);
+      flashToast(u.active ? `Deactivated user ${u.username}` : `Activated user ${u.username}`, "ok");
+    } catch (err: any) {
+      alert(err.message || "Failed to update user status");
+    }
   };
 
-  const remove = (u: User) => {
+  const remove = async (u: User) => {
     if (currentUser?.role === "admin" && u.role !== "staff") {
       alert("Admins can only delete Staff accounts.");
       return;
@@ -185,14 +216,24 @@ const Users: React.FC = () => {
       alert("Cannot delete your own account");
       return;
     }
-    if (!confirm(`Delete user ${u.username}?`)) return;
-    setData((d) => ({ ...d, users: d.users.filter((x) => x.id !== u.id) }));
-    log("USER_DELETE", u.username);
+    if (u.role === "developer" || u.username === "guru") {
+      alert("Primary developer account cannot be deleted.");
+      return;
+    }
+    if (!confirm(`Are you sure you want to permanently delete user "${u.username}" (${u.name})?`)) return;
+    try {
+      await deleteUser(u.id);
+      log("USER_DELETE", u.username);
+      flashToast(`User ${u.username} permanently deleted`, "ok");
+    } catch (err: any) {
+      alert(err.message || "Failed to delete user");
+    }
   };
 
-  const resetPwd = () => {
+  const resetPwd = async () => {
     const pwd = newPwd.trim();
     if (!resetUser || !pwd) return alert("Password cannot be empty");
+    if (pwd.length < 4) return alert("Password must be at least 4 characters");
     if (currentUser?.role === "admin" && resetUser.role !== "staff") {
       alert("Admins can only reset passwords of Staff accounts.");
       return;
@@ -205,11 +246,18 @@ const Users: React.FC = () => {
       alert("You cannot reset your own password through this interface.");
       return;
     }
-    setData((d) => ({ ...d, users: d.users.map((u) => (u.id === resetUser.id ? { ...u, password: pwd } : u)) }));
-    log("USER_PASSWORD_RESET", resetUser.username);
-    alert(`Password for "${resetUser.username}" has been updated successfully.`);
-    setResetUser(null);
-    setNewPwd("");
+    try {
+      setSubmitting(true);
+      await updateUser(resetUser.id, { password: pwd });
+      log("USER_PASSWORD_RESET", resetUser.username);
+      flashToast(`Password for "${resetUser.username}" updated successfully`, "ok");
+      setResetUser(null);
+      setNewPwd("");
+    } catch (err: any) {
+      alert(err.message || "Failed to reset password");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const roleBadge = (u: User) =>
@@ -224,8 +272,8 @@ const Users: React.FC = () => {
         <CardBody className="space-y-3">
           <div className="flex flex-col sm:flex-row gap-3 justify-between items-start sm:items-center">
             <div>
-              <div className="font-semibold text-slate-800">User Management</div>
-              <div className="text-xs text-slate-500">
+              <div className="font-semibold text-slate-800 dark:text-slate-100 text-base sm:text-lg">User Management</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
                 {isDeveloper
                   ? "Developer has full control across all branches."
                   : `Managing users for ${branchName(myBranchId)} only. Other branches are hidden.`}
@@ -234,7 +282,7 @@ const Users: React.FC = () => {
                 Plan Option {staffPlan}{staffPlan === 5 ? " (Custom)" : ""}: Super Admin {usedSuper}/{formatPlanCap(planLimits.superadmin)} · Admin {usedAdmin}/{formatPlanCap(planLimits.admin)} · Staff {usedStaff}/{formatPlanCap(planLimits.staff)}
               </div>
             </div>
-            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <div className="flex flex-wrap sm:flex-nowrap gap-2 w-full sm:w-auto">
               {(isAdmin || isDeveloper) && (
                 <Button
                   onClick={openNewStaff}
@@ -251,9 +299,9 @@ const Users: React.FC = () => {
             </div>
           </div>
           {isDeveloper && (
-            <div className="flex items-center gap-2 pt-3 border-t border-slate-100">
-              <Label className="mb-0 shrink-0">Filter by branch</Label>
-              <Select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} className="max-w-xs">
+            <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <Label className="mb-0 shrink-0 text-xs">Filter by branch:</Label>
+              <Select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} className="w-full sm:w-auto sm:max-w-xs text-xs">
                 <option value="all">All branches</option>
                 {data.branches.map((b) => (
                   <option key={b.id} value={b.id}>{b.name} ({b.code})</option>
@@ -269,16 +317,16 @@ const Users: React.FC = () => {
       <div className="lg:hidden space-y-3">
         {visibleUsers.length === 0 && <Card><CardBody><EmptyState message="No users in this branch" /></CardBody></Card>}
         {visibleUsers.map((u) => (
-          <Card key={u.id}>
-            <CardBody className="space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3">
+          <Card key={u.id} className="overflow-hidden">
+            <CardBody className="space-y-3 p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-3 min-w-0">
                   <div className="w-10 h-10 rounded-full bg-sky-100 text-sky-700 flex items-center justify-center font-semibold text-sm flex-shrink-0">
                     {u.name.charAt(0).toUpperCase()}
                   </div>
                   <div className="min-w-0">
-                    <div className="font-semibold text-slate-800 truncate">{u.name}</div>
-                    <div className="text-xs text-slate-500">@{u.username}</div>
+                    <div className="font-semibold text-slate-800 dark:text-slate-100 truncate text-sm sm:text-base">{u.name}</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 truncate">@{u.username}</div>
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1 flex-shrink-0">
@@ -286,13 +334,13 @@ const Users: React.FC = () => {
                   {u.active ? <Badge tone="green">Active</Badge> : <Badge tone="red">Inactive</Badge>}
                 </div>
               </div>
-              <div className="flex items-center gap-2 text-xs text-slate-500">
+              <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
                 <span className="inline-flex items-center rounded-full bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 px-2 py-0.5 font-medium">
                   {branchName(u.branchId)}
                 </span>
                 <span>· Created {fmtDate(u.createdAt)}</span>
               </div>
-              <div className="flex gap-2 flex-wrap border-t border-slate-100 pt-3">
+              <div className="flex gap-2 flex-wrap border-t border-slate-100 dark:border-slate-800 pt-3">
                 {(isDeveloper || u.role === "staff") && (
                   <Button size="sm" variant="secondary" onClick={() => openEdit(u)}>✏ Edit</Button>
                 )}
@@ -314,11 +362,11 @@ const Users: React.FC = () => {
       </div>
 
       {/* Desktop table */}
-      <Card className="hidden lg:block">
+      <Card className="hidden lg:block overflow-hidden">
         <CardBody className="p-0">
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-slate-50 border-b border-slate-200">
+              <thead className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Username</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Name</th>
@@ -326,14 +374,14 @@ const Users: React.FC = () => {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Role</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Created</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {visibleUsers.map((u) => (
-                  <tr key={u.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3 text-sm font-medium text-slate-700">{u.username}</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{u.name}</td>
+                  <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                    <td className="px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-200">{u.username}</td>
+                    <td className="px-4 py-3 text-sm text-slate-700 dark:text-slate-300">{u.name}</td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center rounded-full bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 px-2 py-0.5 text-xs font-medium">
                         {branchName(u.branchId)}
@@ -342,13 +390,13 @@ const Users: React.FC = () => {
                     <td className="px-4 py-3">{roleBadge(u)}</td>
                     <td className="px-4 py-3">{u.active ? <Badge tone="green">Active</Badge> : <Badge tone="red">Inactive</Badge>}</td>
                     <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(u.createdAt)}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 text-right">
                       {(isDeveloper || u.role === "staff") ? (
-                        <div className="flex gap-1">
-                          <Button size="sm" variant="ghost" onClick={() => openEdit(u)}>✏</Button>
-                          <Button size="sm" variant="ghost" onClick={() => { setResetUser(u); setNewPwd(""); }}>🔑</Button>
-                          <Button size="sm" variant="ghost" onClick={() => toggleActive(u)}>{u.active ? "🚫" : "✅"}</Button>
-                          <Button size="sm" variant="ghost" onClick={() => remove(u)}>🗑</Button>
+                        <div className="flex gap-1 justify-end">
+                          <Button size="sm" variant="ghost" title="Edit user" onClick={() => openEdit(u)}>✏</Button>
+                          <Button size="sm" variant="ghost" title="Reset password" onClick={() => { setResetUser(u); setNewPwd(""); }}>🔑</Button>
+                          <Button size="sm" variant="ghost" title={u.active ? "Deactivate" : "Activate"} onClick={() => toggleActive(u)}>{u.active ? "🚫" : "✅"}</Button>
+                          <Button size="sm" variant="ghost" title="Delete user" onClick={() => remove(u)}>🗑</Button>
                         </div>
                       ) : (
                         <span className="text-xs text-slate-400 italic">Developer only</span>
@@ -377,7 +425,7 @@ const Users: React.FC = () => {
           <div>
             <Label>Password *</Label>
             <PasswordInput value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Set login password" />
-            <p className="text-[11px] text-slate-400 mt-1">Password is stored as-is. Make sure to note it down.</p>
+            <p className="text-[11px] text-slate-400 mt-1">Make sure to note it down.</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
@@ -425,11 +473,13 @@ const Users: React.FC = () => {
           </div>
           <div className="flex items-center gap-2">
             <input id="act" type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} className="rounded" />
-            <label htmlFor="act" className="text-sm text-slate-700">Active (can log in)</label>
+            <label htmlFor="act" className="text-sm text-slate-700 dark:text-slate-300">Active (can log in)</label>
           </div>
-          <div className="flex flex-col sm:flex-row justify-end gap-2 pt-3 border-t border-slate-100">
-            <Button variant="secondary" onClick={() => setOpen(false)} className="w-full sm:w-auto">Cancel</Button>
-            <Button onClick={save} className="w-full sm:w-auto">{edit ? "Update User" : "Create User"}</Button>
+          <div className="flex flex-col sm:flex-row justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+            <Button variant="secondary" onClick={() => setOpen(false)} disabled={submitting} className="w-full sm:w-auto">Cancel</Button>
+            <Button onClick={save} disabled={submitting} className="w-full sm:w-auto">
+              {submitting ? "Saving..." : edit ? "Update User" : "Create User"}
+            </Button>
           </div>
         </div>
       </Modal>
@@ -442,8 +492,10 @@ const Users: React.FC = () => {
             <PasswordInput value={newPwd} onChange={(e) => setNewPwd(e.target.value)} placeholder="Enter new password" />
           </div>
           <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={() => setResetUser(null)} className="w-full sm:w-auto">Cancel</Button>
-            <Button onClick={resetPwd} className="w-full sm:w-auto">Reset Password</Button>
+            <Button variant="secondary" onClick={() => setResetUser(null)} disabled={submitting} className="w-full sm:w-auto">Cancel</Button>
+            <Button onClick={resetPwd} disabled={submitting} className="w-full sm:w-auto">
+              {submitting ? "Saving..." : "Reset Password"}
+            </Button>
           </div>
         </div>
       </Modal>

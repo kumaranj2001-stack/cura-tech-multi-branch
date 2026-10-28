@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
+  deleteDoc,
   deleteField,
   doc,
   getDoc,
@@ -158,14 +159,30 @@ function ensureDefaults(data: AppData): AppData {
   };
 
   if (!next.branches.find((b) => b.id === starterBranch.id)) next.branches.unshift(starterBranch);
-  defaultUsers.forEach((user) => {
-    if (!next.users.find((u) => u.username === user.username)) next.users.push(user);
-  });
-  // The owner account is always the Developer — the only role that can create Super Admins
+
+  if (!next.users || next.users.length === 0) {
+    next.users = [...defaultUsers];
+  } else {
+    // Preserve at least one developer account so developer access is never permanently locked out
+    const hasDeveloper = next.users.some((u) => u.role === "developer" || u.username === "guru");
+    if (!hasDeveloper) {
+      const devAccount = defaultUsers.find((u) => u.role === "developer") || {
+        id: "u_developer",
+        name: "Developer",
+        username: "guru",
+        password: "dev",
+        role: "developer" as const,
+        active: true,
+        createdAt: new Date().toISOString(),
+      };
+      next.users.unshift(devAccount);
+    }
+  }
+
+  // Developer guru role safeguard (preserves developer privileges while respecting custom name & password edits)
   const guru = next.users.find((u) => u.username === "guru");
   if (guru && guru.role !== "developer") {
     guru.role = "developer";
-    guru.name = "Developer";
   }
   return next;
 }
@@ -537,6 +554,9 @@ interface StoreCtx {
   restoreBranchBackup: (branchId: string, incoming: AppData, extras?: { payment?: PaymentSettings; profile?: import("./types").StoreProfile }) => void;
   clearAuditLog: () => Promise<void>;
   purgeAllBusinessData: () => Promise<void>;
+  createUser: (user: Omit<User, "id" | "createdAt"> & { id?: string; createdAt?: string }) => Promise<User>;
+  updateUser: (id: string, patch: Partial<User>) => Promise<User>;
+  deleteUser: (id: string) => Promise<boolean>;
 }
 
 const Ctx = createContext<StoreCtx | null>(null);
@@ -1004,6 +1024,149 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     flashToast("All old invoices, inventory, reports & audit logs purged", "ok");
   }, [applyUpdate]);
 
+  const slicesRef = useRef<Partial<FirestoreSlices>>({});
+
+  const createUser = useCallback(async (userData: Omit<User, "id" | "createdAt"> & { id?: string; createdAt?: string }): Promise<User> => {
+    const id = userData.id || uid("u");
+    const createdAt = userData.createdAt || new Date().toISOString();
+    const newUser: User = {
+      ...userData,
+      id,
+      createdAt,
+    };
+
+    if (slicesRef.current.users) {
+      slicesRef.current.users = [newUser, ...slicesRef.current.users.filter((u) => u.id !== id)];
+    }
+
+    setDataRaw((prev) => {
+      const nextUsers = [newUser, ...prev.users.filter((u) => u.id !== id)];
+      const nextFull = { ...prev, users: nextUsers };
+      saveLocalData(nextFull);
+      fullDataRef.current = nextFull;
+      return nextFull;
+    });
+
+    if (db) {
+      try {
+        await setDoc(doc(db, COLLECTIONS.users, id), removeUndefined(newUser));
+      } catch (err) {
+        console.warn("[createUser firestore error]", err);
+      }
+    }
+
+    try {
+      await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newUser),
+      });
+    } catch (err) {
+      console.warn("[createUser backend error]", err);
+    }
+
+    return newUser;
+  }, []);
+
+  const updateUser = useCallback(async (id: string, patch: Partial<User>): Promise<User> => {
+    const current = fullDataRef.current.users.find((u) => u.id === id);
+    if (!current) throw new Error("User not found");
+
+    let role = patch.role || current.role;
+    if (current.username === "guru" || current.role === "developer") {
+      role = "developer";
+    }
+
+    const updatedUser: User = {
+      ...current,
+      ...patch,
+      id,
+      role,
+    };
+
+    if (slicesRef.current.users) {
+      slicesRef.current.users = slicesRef.current.users.map((u) => (u.id === id ? updatedUser : u));
+    }
+
+    setDataRaw((prev) => {
+      const nextUsers = prev.users.map((u) => (u.id === id ? updatedUser : u));
+      const nextFull = { ...prev, users: nextUsers };
+      saveLocalData(nextFull);
+      fullDataRef.current = nextFull;
+      return nextFull;
+    });
+
+    if (currentUserRef.current?.id === id) {
+      setCurrentUser(updatedUser);
+      try {
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(updatedUser));
+      } catch {}
+    }
+
+    if (db) {
+      try {
+        await setDoc(doc(db, COLLECTIONS.users, id), removeUndefined(updatedUser), { merge: true });
+      } catch (err) {
+        console.warn("[updateUser firestore error]", err);
+      }
+    }
+
+    try {
+      await fetch(`/api/users/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+    } catch (err) {
+      console.warn("[updateUser backend error]", err);
+    }
+
+    return updatedUser;
+  }, []);
+
+  const deleteUser = useCallback(async (id: string): Promise<boolean> => {
+    const target = fullDataRef.current.users.find((u) => u.id === id);
+    if (!target) return true;
+
+    if (target.role === "developer" || target.username === "guru") {
+      throw new Error("Cannot delete primary developer account");
+    }
+
+    if (target.id === currentUserRef.current?.id) {
+      throw new Error("Cannot delete your own account");
+    }
+
+    if (slicesRef.current.users) {
+      slicesRef.current.users = slicesRef.current.users.filter((u) => u.id !== id);
+    }
+
+    setDataRaw((prev) => {
+      const nextUsers = prev.users.filter((u) => u.id !== id);
+      const nextFull = { ...prev, users: nextUsers };
+      saveLocalData(nextFull);
+      fullDataRef.current = nextFull;
+      return nextFull;
+    });
+
+    if (db) {
+      try {
+        await deleteDoc(doc(db, COLLECTIONS.users, id));
+      } catch (err) {
+        console.warn("[deleteUser firestore error]", err);
+      }
+    }
+
+    try {
+      await fetch(`/api/users/${id}`, {
+        method: "DELETE",
+      });
+    } catch (err) {
+      console.warn("[deleteUser backend error]", err);
+    }
+
+    return true;
+  }, []);
+
   useEffect(() => {
     let disposed = false;
     if (!db) {
@@ -1011,7 +1174,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return;
     }
     const localSeed = initialData();
-    const slices: Partial<FirestoreSlices> = {};
+    const slices = slicesRef.current;
     let counters: AppData["counters"] | null = null;
     let cutoffs: CloudCutoffs = {};
     let metaReady = false;
@@ -1188,7 +1351,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     restoreBranchBackup,
     clearAuditLog,
     purgeAllBusinessData,
-  }), [data, setData, currentUser, currentBranch, viewBranchId, setViewBranchIdGuarded, flags, setFlag, setFlagsBatch, staffPlan, setStaffPlan, customStaffPlanLimits, setCustomStaffPlanLimits, payment, branchPayments, branchProfiles, login, logout, log, cloudReady, cloudSyncing, cloudError, buildBranchBackup, restoreBranchBackup, clearAuditLog, purgeAllBusinessData]);
+    createUser,
+    updateUser,
+    deleteUser,
+  }), [data, setData, currentUser, currentBranch, viewBranchId, setViewBranchIdGuarded, flags, setFlag, setFlagsBatch, staffPlan, setStaffPlan, customStaffPlanLimits, setCustomStaffPlanLimits, payment, branchPayments, branchProfiles, login, logout, log, cloudReady, cloudSyncing, cloudError, buildBranchBackup, restoreBranchBackup, clearAuditLog, purgeAllBusinessData, createUser, updateUser, deleteUser]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 };
