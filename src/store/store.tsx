@@ -13,9 +13,9 @@ import { flashToast } from "../utils/helpers";
 import type { AppData, AuditLog, Branch, Doctor, FeatureFlags, GRN, Invoice, Medicine, Patient, PaymentSettings, ReturnEntry, StaffPlanLimits, StaffPlanTier, Supplier, User } from "./types";
 import { DEFAULT_CUSTOM_STAFF_LIMITS, DEFAULT_FEATURE_FLAGS, DEFAULT_STAFF_PLAN, isStaffPlanTier, planAllowsMultiBranch, getAuditRetentionMs } from "./types";
 
-const DATA_KEY = "guru_pharma_data_v3";
-const SESSION_KEY = "guru_pharma_session_v3";
-const BRANCH_SESSION_KEY = "guru_pharma_session_branch_v3";
+const DATA_KEY = "guru_pharma_data_v4";
+const SESSION_KEY = "guru_pharma_session_v4";
+const BRANCH_SESSION_KEY = "guru_pharma_session_branch_v4";
 
 const COLLECTIONS = {
   branches: "gp_branches",
@@ -50,35 +50,6 @@ const defaultUsers: User[] = [
     password: "kumaran",
     name: "Developer",
     role: "developer",
-    active: true,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "u_super",
-    username: "super",
-    password: "admin",
-    name: "Super Admin",
-    role: "superadmin",
-    active: true,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "u_admin",
-    username: "kumaran",
-    password: "kumaranjkms",
-    name: "Kumaran (Admin)",
-    role: "admin",
-    branchId: "br_main",
-    active: true,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "u_staff",
-    username: "staff123",
-    password: "kumaranjk",
-    name: "Pharmacy Staff",
-    role: "staff",
-    branchId: "br_main",
     active: true,
     createdAt: new Date().toISOString(),
   },
@@ -141,11 +112,20 @@ function saveLocalData(data: AppData) {
 }
 
 function ensureDefaults(data: AppData): AppData {
+  // Only Developer accounts are preserved; filter out admin, superadmin, and staff
+  const devUsers = (data.users || [])
+    .filter((u) => u.role === "developer" || u.username === "guru")
+    .map((u) => (u.role === "developer" ? u : { ...u, role: "developer" as const, name: "Developer" }));
+
+  defaultUsers.forEach((user) => {
+    if (!devUsers.find((u) => u.username === user.username)) devUsers.push(user);
+  });
+
   const next: AppData = {
     ...seedData(),
     ...data,
     branches: [...(data.branches || [])],
-    users: [...(data.users || [])],
+    users: devUsers,
     medicines: [...(data.medicines || [])],
     patients: [...(data.patients || [])],
     doctors: [...(data.doctors || defaultDoctors)].map((d) => (d.branchId ? d : { ...d, branchId: starterBranch.id })),
@@ -158,15 +138,6 @@ function ensureDefaults(data: AppData): AppData {
   };
 
   if (!next.branches.find((b) => b.id === starterBranch.id)) next.branches.unshift(starterBranch);
-  defaultUsers.forEach((user) => {
-    if (!next.users.find((u) => u.username === user.username)) next.users.push(user);
-  });
-  // The owner account is always the Developer — the only role that can create Super Admins
-  const guru = next.users.find((u) => u.username === "guru");
-  if (guru && guru.role !== "developer") {
-    guru.role = "developer";
-    guru.name = "Developer";
-  }
   return next;
 }
 
@@ -479,7 +450,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
       const raw = sessionStorage.getItem(SESSION_KEY);
-      return raw ? (JSON.parse(raw) as User) : null;
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as User;
+      if (parsed.role !== "developer") {
+        sessionStorage.removeItem(SESSION_KEY);
+        sessionStorage.removeItem(BRANCH_SESSION_KEY);
+        return null;
+      }
+      return parsed;
     } catch {
       return null;
     }
@@ -847,30 +825,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const login = useCallback((username: string, password: string) => {
     const allUsers = fullDataRef.current.users;
-    const user = allUsers.find((x) => x.username === username.trim());
+    const user = allUsers.find((x) => x.username.trim().toLowerCase() === username.trim().toLowerCase());
     if (!cloudReady && allUsers.length === 0) return { ok: false, message: "Connecting to cloud data. Please wait..." };
     if (!user) return { ok: false, message: "User not found" };
-    if (!user.active) return { ok: false, message: "Account is deactivated. Contact admin." };
+    if (!user.active) return { ok: false, message: "Account is deactivated." };
     if (user.password !== password) return { ok: false, message: "Incorrect password" };
+    if (user.role !== "developer") return { ok: false, message: "Access restricted: Only Developer access is permitted." };
 
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
     setCurrentUser(user);
+    setCurrentBranch(null);
+    setViewBranchId(null);
+    sessionStorage.removeItem(BRANCH_SESSION_KEY);
 
-    if (user.role !== "developer" && user.role !== "superadmin") {
-      const branch = user.branchId ? fullDataRef.current.branches.find((b) => b.id === user.branchId) : undefined;
-      if (!branch) {
-        sessionStorage.removeItem(SESSION_KEY);
-        return { ok: false, message: "No branch is assigned to your account. Contact the Super Admin." };
-      }
-      setCurrentBranch(branch);
-      sessionStorage.setItem(BRANCH_SESSION_KEY, JSON.stringify(branch));
-    } else {
-      setCurrentBranch(null);
-      setViewBranchId(null);
-      sessionStorage.removeItem(BRANCH_SESSION_KEY);
-    }
-
-    log("LOGIN", `${user.role} logged in`);
+    log("LOGIN", `Developer ${user.username} logged in`);
     return { ok: true };
   }, [cloudReady, log]);
 
@@ -1029,14 +997,28 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [currentUser, currentBranch, fullData.users, fullData.branches]);
 
-  // One-time cleanup: remove the legacy "jk" test super-admin (requested removal).
-  // Runs once per device; the resulting sync deletes the record from Firebase too.
+  // One-time comprehensive cleanup: purge all old invoices, inventory tablets & details, audit logs, grns, returns, and all non-developer accounts
   useEffect(() => {
-    if (localStorage.getItem("gp_removed_jk")) return;
-    localStorage.setItem("gp_removed_jk", "1");
-    if (fullDataRef.current.users.some((u) => u.username === "jk")) {
-      setData((d) => ({ ...d, users: d.users.filter((u) => u.username !== "jk") }));
-    }
+    const WIPE_KEY = "gp_wipe_invoices_medicines_audit_developer_v4";
+    if (localStorage.getItem(WIPE_KEY)) return;
+    localStorage.setItem(WIPE_KEY, "1");
+    try {
+      localStorage.removeItem("guru_pharma_data_v3");
+      localStorage.removeItem("guru_pharma_data_v2");
+      localStorage.removeItem("guru_pharma_data_v1");
+      sessionStorage.removeItem("guru_pharma_session_v3");
+      sessionStorage.removeItem("guru_pharma_session_branch_v3");
+    } catch {}
+    setData((d) => ({
+      ...d,
+      medicines: [],
+      invoices: [],
+      audit: [],
+      grns: [],
+      returns: [],
+      users: defaultUsers,
+      counters: { invoice: 1000, grn: 500 },
+    }));
   }, [setData]);
 
   const value = useMemo<StoreCtx>(() => ({

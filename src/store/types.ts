@@ -375,19 +375,8 @@ export const canCreateAccount = (
   exceptId?: string,
   customLimits?: StaffPlanLimits
 ): { ok: boolean; message?: string } => {
-  if (role === "developer") return { ok: true };
-  const limits = staffPlanLimits(tier, customLimits);
-  const max = roleQuota(limits, role);
-  const used = users.filter((u) => u.role === role && u.id !== exceptId).length;
-  const label = role === "staff" ? "staff" : role === "admin" ? "admin" : "super admin";
-  if (max <= 0) {
-    return { ok: false, message: `The selected plan does not permit ${label} accounts.` };
-  }
-  if (used >= max) {
-    return {
-      ok: false,
-      message: `This plan allows ${formatPlanCap(max)} ${label} account${max === 1 ? "" : "s"}. The limit has been reached.`,
-    };
+  if (role !== "developer") {
+    return { ok: false, message: "Only Developer access is permitted. All other roles (Staff, Admin, Super Admin) are disabled." };
   }
   return { ok: true };
 };
