@@ -2,6 +2,7 @@ import http from "node:http";
 import { parseInvoiceDocument } from "./intelligentParser.mjs";
 import { calculateBillingTotals } from "./billingCalculator.mjs";
 import { filterMedicines } from "./inventoryFilter.mjs";
+import { validateMedicinePayload, createMedicine, updateMedicine, deleteMedicine } from "./medicineHandler.mjs";
 import { listApprovedGrns, updateApprovedGrn, deleteApprovedGrn, isDeveloperRole } from "./approvedGrnHandler.mjs";
 import { listDoctors, createDoctor, updateDoctor, deleteDoctor } from "./doctorHandler.mjs";
 import { db, COLLECTIONS, firebaseConfig } from "./firebase.mjs";
@@ -247,6 +248,177 @@ const server = http.createServer(async (req, res) => {
         });
       } catch (err) {
         return sendJson(res, 500, { success: false, error: err.message || "Failed to filter inventory" });
+      }
+    });
+    return;
+  }
+
+  // Inventory Medicine Validation Endpoint
+  if (req.method === "POST" && (url.pathname === "/api/inventory/medicine/validate" || url.pathname === "/api/medicines/validate")) {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 10 * 1024 * 1024) req.destroy();
+    });
+
+    req.on("end", () => {
+      try {
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        const payload = JSON.parse(body);
+        const medicineData = payload.medicine || payload;
+        const validation = validateMedicinePayload(medicineData, {
+          requirePurchaseDetails: payload.requirePurchaseDetails ?? true,
+        });
+
+        if (!validation.isValid) {
+          return sendJson(res, 400, {
+            success: false,
+            isValid: false,
+            errors: validation.errors,
+            error: validation.message,
+          });
+        }
+
+        return sendJson(res, 200, {
+          success: true,
+          isValid: true,
+          cleanData: validation.cleanData,
+        });
+      } catch (err) {
+        return sendJson(res, 400, { success: false, error: err.message });
+      }
+    });
+    return;
+  }
+
+  // Inventory Medicine List Endpoint
+  if (req.method === "GET" && (url.pathname === "/api/inventory/medicines" || url.pathname === "/api/medicines")) {
+    try {
+      const snap = await getDocs(collection(db, COLLECTIONS.medicines));
+      const firestoreDocs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      return sendJson(res, 200, {
+        success: true,
+        source: "firestore",
+        count: firestoreDocs.length,
+        medicines: firestoreDocs,
+      });
+    } catch (err) {
+      return sendJson(res, 200, {
+        success: true,
+        source: "local",
+        count: 0,
+        medicines: [],
+        warning: err.message,
+      });
+    }
+  }
+
+  // Inventory Medicine Creation Endpoint
+  if (req.method === "POST" && (url.pathname === "/api/inventory/medicine" || url.pathname === "/api/medicines")) {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 10 * 1024 * 1024) req.destroy();
+    });
+
+    req.on("end", async () => {
+      try {
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        const payload = JSON.parse(body);
+        const { medicine, medicines = [], requirePurchaseDetails = true } = payload;
+        const medicineData = medicine || payload;
+
+        const result = createMedicine(medicineData, medicines, { requirePurchaseDetails });
+
+        // Save to Firestore gp_medicines
+        try {
+          const docData = {};
+          for (const [k, v] of Object.entries(result.medicine)) {
+            if (v !== undefined) docData[k] = v;
+          }
+          await setDoc(doc(db, COLLECTIONS.medicines, result.medicine.id), docData);
+        } catch (dbErr) {
+          console.warn("[Firebase medicine save warning]", dbErr.message);
+        }
+
+        return sendJson(res, 201, result);
+      } catch (err) {
+        return sendJson(res, err.statusCode || 400, {
+          success: false,
+          error: err.message,
+          errors: err.errors || [err.message],
+        });
+      }
+    });
+    return;
+  }
+
+  // Inventory Medicine Update Endpoint
+  if ((req.method === "PUT" && (url.pathname.startsWith("/api/inventory/medicine/") || url.pathname.startsWith("/api/medicines/"))) ||
+      (req.method === "POST" && (url.pathname === "/api/inventory/medicine/update" || url.pathname === "/api/medicines/update"))) {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 10 * 1024 * 1024) req.destroy();
+    });
+
+    req.on("end", async () => {
+      try {
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        const payload = JSON.parse(body);
+        const pathParts = url.pathname.split("/");
+        const urlId = (url.pathname.includes("/update")) ? null : pathParts[pathParts.length - 1];
+        const id = payload.id || urlId;
+        const { patch, medicines = [] } = payload;
+        const result = updateMedicine(id, patch || payload, medicines);
+
+        // Update in Firestore gp_medicines
+        try {
+          const docData = {};
+          for (const [k, v] of Object.entries(result.medicine)) {
+            if (v !== undefined) docData[k] = v;
+          }
+          await setDoc(doc(db, COLLECTIONS.medicines, result.medicine.id), docData, { merge: true });
+        } catch (dbErr) {
+          console.warn("[Firebase medicine update warning]", dbErr.message);
+        }
+
+        return sendJson(res, 200, result);
+      } catch (err) {
+        return sendJson(res, err.statusCode || 400, { success: false, error: err.message });
+      }
+    });
+    return;
+  }
+
+  // Inventory Medicine Delete Endpoint
+  if ((req.method === "DELETE" && (url.pathname.startsWith("/api/inventory/medicine/") || url.pathname.startsWith("/api/medicines/"))) ||
+      (req.method === "POST" && (url.pathname === "/api/inventory/medicine/delete" || url.pathname === "/api/medicines/delete"))) {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 10 * 1024 * 1024) req.destroy();
+    });
+
+    req.on("end", async () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const pathParts = url.pathname.split("/");
+        const urlId = (url.pathname.includes("/delete")) ? null : pathParts[pathParts.length - 1];
+        const id = payload.id || urlId;
+        const { medicines = [] } = payload;
+        const result = deleteMedicine(id, medicines);
+
+        // Delete from Firestore gp_medicines
+        try {
+          await deleteDoc(doc(db, COLLECTIONS.medicines, id));
+        } catch (dbErr) {
+          console.warn("[Firebase medicine delete warning]", dbErr.message);
+        }
+
+        return sendJson(res, 200, result);
+      } catch (err) {
+        return sendJson(res, err.statusCode || 400, { success: false, error: err.message });
       }
     });
     return;

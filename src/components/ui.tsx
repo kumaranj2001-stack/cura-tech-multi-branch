@@ -134,13 +134,13 @@ export const Modal: React.FC<{ open: boolean; onClose: () => void; title: string
   if (!open) return null;
   const w = { sm: "max-w-md", md: "max-w-2xl", lg: "max-w-4xl", xl: "max-w-6xl" }[size];
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 dark:bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className={cn("bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full overflow-hidden border border-slate-200 dark:border-slate-700", w)} onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-          <h3 className="font-semibold text-slate-800 dark:text-slate-100">{title}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-xl leading-none">×</button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 md:p-6 bg-slate-900/40 dark:bg-black/60 backdrop-blur-sm overflow-y-auto" onClick={onClose}>
+      <div className={cn("bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full overflow-hidden border border-slate-200 dark:border-slate-700 max-h-[92vh] sm:max-h-[88vh] flex flex-col my-auto", w)} onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 sm:px-6 py-3.5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0">
+          <h3 className="font-semibold text-slate-800 dark:text-slate-100 text-base sm:text-lg">{title}</h3>
+          <button onClick={onClose} aria-label="Close modal" className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-2xl leading-none w-8 h-8 rounded-lg flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">×</button>
         </div>
-        <div className="p-5 max-h-[80vh] overflow-y-auto">{children}</div>
+        <div className="p-4 sm:p-6 overflow-y-auto flex-1">{children}</div>
       </div>
     </div>
   );

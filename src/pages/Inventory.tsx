@@ -1,12 +1,38 @@
 import React, { useMemo, useState } from "react";
 import { useStore, uid } from "../store/store";
-import { FileDown, Minus, Plus, Gauge } from "lucide-react";
+import { FileDown, Minus, Plus, Gauge, Pencil } from "lucide-react";
 import { Card, CardBody, Input, Label, Button, Th, Td, Modal, Badge, EmptyState, Select } from "../components/ui";
 import { fmtCurrency, isExpired, daysToExpiry, downloadPDF, flashToast } from "../utils/helpers";
 import type { Medicine } from "../store/types";
 import { minStockOf } from "../store/types";
 
-const empty = { name: "", batch: "", purchasePrice: 0, sellingPrice: 0, stock: 0, supplier: "", expiry: "", mfgDate: "", gst: 5, narcotic: false, minStock: 10 };
+export interface MedicineFormState {
+  name: string;
+  batch: string;
+  purchasePrice: number | string;
+  sellingPrice: number | string;
+  stock: number | string;
+  supplier: string;
+  expiry: string;
+  mfgDate: string;
+  gst: number | string;
+  narcotic: boolean;
+  minStock: number | string;
+}
+
+const empty: MedicineFormState = {
+  name: "",
+  batch: "",
+  purchasePrice: "",
+  sellingPrice: "",
+  stock: "",
+  supplier: "",
+  expiry: "",
+  mfgDate: "",
+  gst: 5,
+  narcotic: false,
+  minStock: 10,
+};
 
 export type InventoryFilter = "all" | "out" | "narcotic" | "low" | "expired" | "exp30" | "exp60" | "exp90";
 
@@ -142,6 +168,26 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
     setOpen(true);
   };
 
+  const openEdit = (m: Medicine) => {
+    setEdit(m);
+    setForm({
+      name: m.name,
+      batch: m.batch || "",
+      purchasePrice: m.purchasePrice ?? "",
+      sellingPrice: m.sellingPrice ?? "",
+      stock: m.stock ?? "",
+      supplier: m.supplier || "",
+      expiry: m.expiry || "",
+      mfgDate: m.mfgDate || "",
+      gst: m.gst ?? 5,
+      narcotic: Boolean(m.narcotic),
+      minStock: m.minStock ?? 10,
+    });
+    setSupplierQuery("");
+    setSupplierMenuOpen(false);
+    setOpen(true);
+  };
+
   // When GRN Entry & Approvals is disabled, medicines must be added with full purchase details
   const grnOff = !flags.grnModule;
 
@@ -154,7 +200,7 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
 
   const today = new Date().toISOString().slice(0, 10);
 
-  const save = () => {
+  const save = async () => {
     if (!form.name.trim()) {
       alert("Medicine name is required");
       return;
@@ -174,20 +220,117 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
       alert("Manufacturing date cannot be in the future");
       return;
     }
+
     if (!edit && grnOff) {
-      if (form.stock <= 0) return alert("Quantity must be greater than 0");
-      if (!form.expiry) return alert("Expiry date is required");
-      if (!form.mfgDate) return alert("Manufacturing date is required");
-      if (form.purchasePrice <= 0) return alert("Buying price must be greater than 0");
-      if (form.sellingPrice <= 0) return alert("Selling price must be greater than 0");
+      if (form.stock === "" || form.stock === undefined || form.stock === null) {
+        alert("Quantity is required and cannot be blank.");
+        return;
+      }
+      const numStock = Number(form.stock);
+      if (isNaN(numStock) || numStock <= 0) {
+        alert("Quantity must be a valid number greater than 0.");
+        return;
+      }
+
+      if (!form.mfgDate) {
+        alert("Manufacturing date is required.");
+        return;
+      }
+      if (!form.expiry) {
+        alert("Expiry date is required.");
+        return;
+      }
+
+      if (form.purchasePrice === "" || form.purchasePrice === undefined || form.purchasePrice === null) {
+        alert("Buying price is required and cannot be blank.");
+        return;
+      }
+      const numBuying = Number(form.purchasePrice);
+      if (isNaN(numBuying) || numBuying <= 0) {
+        alert("Buying price must be greater than 0.");
+        return;
+      }
+
+      if (form.sellingPrice === "" || form.sellingPrice === undefined || form.sellingPrice === null) {
+        alert("Selling price is required and cannot be blank.");
+        return;
+      }
+      const numSelling = Number(form.sellingPrice);
+      if (isNaN(numSelling) || numSelling <= 0) {
+        alert("Selling price must be greater than 0.");
+        return;
+      }
+
+      if (numSelling < numBuying) {
+        const confirmLower = window.confirm("Selling price is lower than buying price. Do you want to proceed?");
+        if (!confirmLower) return;
+      }
     }
+
+    const parsedStock = form.stock === "" ? 0 : Math.round(Number(form.stock));
+    const parsedPurchasePrice = form.purchasePrice === "" ? 0 : Number(form.purchasePrice);
+    const parsedSellingPrice = form.sellingPrice === "" ? 0 : Number(form.sellingPrice);
+    const parsedGst = form.gst === "" ? 0 : Number(form.gst);
+    const parsedMinStock = form.minStock === "" ? 10 : Number(form.minStock);
+
+    const cleanMedicineData = {
+      name: form.name.trim(),
+      supplier: form.supplier.trim(),
+      batch: form.batch.trim(),
+      stock: parsedStock,
+      purchasePrice: parsedPurchasePrice,
+      sellingPrice: parsedSellingPrice,
+      expiry: form.expiry,
+      mfgDate: form.mfgDate,
+      gst: parsedGst,
+      narcotic: form.narcotic,
+      minStock: parsedMinStock,
+    };
+
     if (edit) {
-      setData((d) => ({ ...d, medicines: d.medicines.map((m) => (m.id === edit.id ? { ...m, ...form } : m)) }));
-      log("MEDICINE_UPDATE", `${form.name} (${form.batch})`);
+      try {
+        await fetch(`/api/inventory/medicine/${edit.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: edit.id, patch: cleanMedicineData }),
+        });
+      } catch (apiErr) {
+        console.warn("[Backend Medicine Update Warning]", apiErr);
+      }
+
+      setData((d) => ({ ...d, medicines: d.medicines.map((m) => (m.id === edit.id ? { ...m, ...cleanMedicineData } : m)) }));
+      log("MEDICINE_UPDATE", `${cleanMedicineData.name} (${cleanMedicineData.batch})`);
+      flashToast(`Medicine "${cleanMedicineData.name}" updated successfully`, "ok");
     } else {
-      const nm: Medicine = { id: uid("m"), ...form };
+      let backendMedicine: Medicine | null = null;
+      try {
+        const res = await fetch("/api/inventory/medicine", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            medicine: cleanMedicineData,
+            medicines: data.medicines,
+            requirePurchaseDetails: grnOff,
+          }),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.medicine) backendMedicine = json.medicine;
+        } else {
+          const errJson = await res.json().catch(() => null);
+          if (errJson?.error) {
+            alert(errJson.error);
+            return;
+          }
+        }
+      } catch (apiErr) {
+        console.warn("[Backend Medicine Create Warning]", apiErr);
+      }
+
+      const nm: Medicine = backendMedicine || { id: uid("m"), ...cleanMedicineData };
       setData((d) => ({ ...d, medicines: [nm, ...d.medicines] }));
-      log("MEDICINE_CREATE", `${form.name} (${form.batch})`);
+      log("MEDICINE_CREATE", `${cleanMedicineData.name} (${cleanMedicineData.batch})`);
+      flashToast(`Medicine "${cleanMedicineData.name}" added to inventory`, "ok");
     }
     setOpen(false);
   };
@@ -266,6 +409,7 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
                   <Th>GST</Th>
                   <Th>Expiry</Th>
                   <Th>Status</Th>
+                  <Th className="text-right">Actions</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -311,6 +455,16 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
                         {m.stock === 0 && <Badge tone="red">OUT</Badge>}
                         {m.stock > 0 && m.stock <= minStockOf(m) && <Badge tone="amber">LOW</Badge>}
                       </Td>
+                      <Td className="text-right">
+                        <button
+                          onClick={() => openEdit(m)}
+                          title="Edit Medicine"
+                          className="p-1.5 rounded-lg text-slate-500 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-slate-700 transition-colors inline-flex items-center gap-1 text-xs font-medium"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Edit</span>
+                        </button>
+                      </Td>
                     </tr>
                   );
                 })}
@@ -330,27 +484,102 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
       </Card>
 
       <Modal open={open} onClose={() => setOpen(false)} title={edit ? "Edit Medicine" : "Add Medicine"} size="md">
-        <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2"><Label>Medicine Name *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Paracetamol 500mg" /></div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4">
+          <div className="col-span-1 sm:col-span-2">
+            <Label>Medicine Name *</Label>
+            <Input
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="e.g. Paracetamol 500mg"
+            />
+          </div>
 
           {/* Full purchase fields: always when GRN module is off (no GRN intake), else only when editing */}
           {(edit || grnOff) && (
             <>
-              <div><Label>Batch</Label><Input value={form.batch} onChange={(e) => setForm({ ...form, batch: e.target.value })} /></div>
-              <div><Label>Quantity *</Label><Input type="number" min={0} value={form.stock} onChange={(e) => setForm({ ...form, stock: Number(e.target.value) })} /></div>
-              <div><Label>Manufacturing Date *</Label><Input type="date" max={today} value={form.mfgDate} onChange={(e) => setForm({ ...form, mfgDate: e.target.value })} /></div>
-              <div><Label>Expiry Date *</Label><Input type="date" value={form.expiry} onChange={(e) => setForm({ ...form, expiry: e.target.value })} /></div>
-              <div><Label>Buying Price ₹ *</Label><Input type="number" step="0.01" min={0} value={form.purchasePrice} onChange={(e) => setForm({ ...form, purchasePrice: Number(e.target.value) })} /></div>
-              <div><Label>Selling Price ₹ *</Label><Input type="number" step="0.01" min={0} value={form.sellingPrice} onChange={(e) => setForm({ ...form, sellingPrice: Number(e.target.value) })} /></div>
-              <div><Label>GST % *</Label><Input type="number" min={0} value={form.gst} onChange={(e) => setForm({ ...form, gst: Number(e.target.value) })} /></div>
+              <div>
+                <Label>Batch</Label>
+                <Input
+                  value={form.batch}
+                  onChange={(e) => setForm({ ...form, batch: e.target.value })}
+                  placeholder="e.g. BTH-8921"
+                />
+              </div>
+              <div>
+                <Label>Quantity *</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  step="1"
+                  value={form.stock}
+                  onChange={(e) => setForm({ ...form, stock: e.target.value })}
+                  placeholder="Enter quantity"
+                />
+              </div>
+              <div>
+                <Label>Manufacturing Date *</Label>
+                <Input
+                  type="date"
+                  max={today}
+                  value={form.mfgDate}
+                  onChange={(e) => setForm({ ...form, mfgDate: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label>Expiry Date *</Label>
+                <Input
+                  type="date"
+                  value={form.expiry}
+                  onChange={(e) => setForm({ ...form, expiry: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label>Buying Price ₹ *</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={form.purchasePrice}
+                  onChange={(e) => setForm({ ...form, purchasePrice: e.target.value })}
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <Label>Selling Price ₹ *</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={form.sellingPrice}
+                  onChange={(e) => setForm({ ...form, sellingPrice: e.target.value })}
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <Label>GST % *</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={form.gst}
+                  onChange={(e) => setForm({ ...form, gst: e.target.value })}
+                  placeholder="5"
+                />
+              </div>
             </>
           )}
 
           <div>
             <Label>Minimum Stock *</Label>
-            <Input type="number" min={0} value={form.minStock} onChange={(e) => setForm({ ...form, minStock: Number(e.target.value) })} />
+            <Input
+              type="number"
+              min={0}
+              value={form.minStock}
+              onChange={(e) => setForm({ ...form, minStock: e.target.value })}
+              placeholder="10"
+            />
             <p className="text-[11px] text-slate-400 mt-1">Alerts trigger when stock falls to this level. Set 2–5 for small-pack drugs, 50+ for fast movers.</p>
           </div>
+
           <div className="relative">
             <Label>Supplier * (Existing Suppliers List Only)</Label>
             {form.supplier ? (
@@ -384,7 +613,7 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
                   autoComplete="off"
                 />
                 {supplierMenuOpen && (
-                  <div className="absolute z-30 mt-1 w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                  <div className="absolute z-30 mt-1 left-0 right-0 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg shadow-xl max-h-48 overflow-y-auto">
                     {data.suppliers.length === 0 ? (
                       <div className="p-3 text-center text-xs text-rose-600 dark:text-rose-400 font-semibold">
                         No suppliers exist yet. Please add suppliers in the Suppliers section first.
@@ -426,21 +655,33 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
             </p>
           </div>
 
-          <div className="col-span-2 flex items-center gap-2 rounded-lg border border-rose-200 dark:border-rose-800 bg-rose-50/60 dark:bg-rose-900/20 px-3 py-2.5">
-            <input type="checkbox" id="narc" checked={form.narcotic} onChange={(e) => setForm({ ...form, narcotic: e.target.checked })} className="accent-rose-600 w-4 h-4" />
-            <label htmlFor="narc" className="text-sm font-medium text-rose-700 dark:text-rose-300">Narcotic / Controlled — prescription required</label>
+          <div className="col-span-1 sm:col-span-2 flex items-center gap-2.5 rounded-lg border border-rose-200 dark:border-rose-800 bg-rose-50/60 dark:bg-rose-900/20 px-3 py-2.5">
+            <input
+              type="checkbox"
+              id="narc"
+              checked={form.narcotic}
+              onChange={(e) => setForm({ ...form, narcotic: e.target.checked })}
+              className="accent-rose-600 w-4 h-4 cursor-pointer"
+            />
+            <label htmlFor="narc" className="text-sm font-medium text-rose-700 dark:text-rose-300 cursor-pointer select-none">
+              Narcotic / Controlled — prescription required
+            </label>
           </div>
 
           {!edit && !grnOff && (
-            <p className="col-span-2 text-[11px] text-slate-400">Batch, pricing, GST and stock are captured automatically when you receive this medicine through GRN Entry.</p>
+            <p className="col-span-1 sm:col-span-2 text-[11px] text-slate-400">
+              Batch, pricing, GST and stock are captured automatically when you receive this medicine through GRN Entry.
+            </p>
           )}
           {grnOff && !edit && (
-            <p className="col-span-2 text-[11px] text-amber-600 dark:text-amber-400">GRN Entry &amp; Approvals is disabled, so full purchase details are required here.</p>
+            <p className="col-span-1 sm:col-span-2 text-[11px] text-amber-600 dark:text-amber-400">
+              GRN Entry &amp; Approvals is disabled, so full purchase details are required here.
+            </p>
           )}
 
-          <div className="col-span-2 flex justify-end gap-2 pt-3">
-            <Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={save}>{edit ? "Save Changes" : "Add Medicine"}</Button>
+          <div className="col-span-1 sm:col-span-2 flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 pt-3 sm:pt-4 border-t border-slate-100 dark:border-slate-700 mt-1">
+            <Button variant="secondary" className="w-full sm:w-auto" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button className="w-full sm:w-auto" onClick={save}>{edit ? "Save Changes" : "Add Medicine"}</Button>
           </div>
         </div>
       </Modal>
