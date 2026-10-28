@@ -217,8 +217,9 @@ function grnIntelligentParserPlugin(): Plugin {
               const pathParts = url.pathname.split("/");
               const urlId = url.pathname.includes("/update") ? null : pathParts[pathParts.length - 1];
               const id = payload.id || urlId;
+              const role = payload.role || (req.headers["x-user-role"] as string) || "";
               const { patch, medicines = [] } = payload;
-              const result = updateMedicine(id, patch || payload, medicines);
+              const result = updateMedicine(id, patch || payload, medicines, role);
 
               try {
                 const { db, COLLECTIONS } = await import("./server/firebase.mjs");
@@ -275,6 +276,108 @@ function grnIntelligentParserPlugin(): Plugin {
               res.statusCode = errorObj.statusCode || 400;
               res.setHeader("Content-Type", "application/json");
               res.end(JSON.stringify({ success: false, error: errorObj.message || "Delete failed" }));
+            }
+          });
+          return;
+        }
+
+        // Inventory Medicine Min-Stock Patch middleware
+        if ((req.method === "PATCH" || req.method === "POST" || req.method === "PUT") &&
+            (url.pathname.includes("/min-stock") && (url.pathname.startsWith("/api/inventory/medicine/") || url.pathname.startsWith("/api/medicines/")))) {
+          let body = "";
+          req.on("data", (chunk) => { body += chunk; });
+          req.on("end", async () => {
+            try {
+              const payload = JSON.parse(body || "{}");
+              const pathParts = url.pathname.split("/").filter(Boolean);
+              const id = payload.id || pathParts[pathParts.length - 2];
+              const role = payload.role || (req.headers["x-user-role"] as string) || "";
+              const minStock = payload.minStock;
+              const medicines = payload.medicines || [];
+
+              const { updateMedicineMinStock } = await import("./server/medicineHandler.mjs");
+              const result = updateMedicineMinStock(id, minStock, role, medicines);
+
+              try {
+                const { db, COLLECTIONS } = await import("./server/firebase.mjs");
+                const { doc, setDoc } = await import("firebase/firestore");
+                await setDoc(doc(db, COLLECTIONS.medicines, id), { minStock: result.medicine.minStock }, { merge: true });
+              } catch (dbErr) {
+                console.warn("[Vite minStock Firestore update warning]", (dbErr as Error).message);
+              }
+
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify(result));
+            } catch (err: unknown) {
+              const errorObj = err as { statusCode?: number; message?: string };
+              res.statusCode = errorObj.statusCode || 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false, error: errorObj.message || "Min stock update failed" }));
+            }
+          });
+          return;
+        }
+
+        // Inventory Control Settings middleware
+        if (url.pathname === "/api/inventory/settings" && req.method === "GET") {
+          try {
+            const { db, COLLECTIONS } = await import("./server/firebase.mjs");
+            const { doc, getDoc } = await import("firebase/firestore");
+            const metaSnap = await getDoc(doc(db, COLLECTIONS.meta, "app"));
+            const flags = metaSnap.exists() ? (metaSnap.data()?.featureFlags || {}) : {};
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({
+              success: true,
+              flags: { minStockFeature: flags.minStockFeature !== false },
+            }));
+          } catch (err) {
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({
+              success: true,
+              flags: { minStockFeature: true },
+              warning: (err as Error).message,
+            }));
+          }
+          return;
+        }
+
+        if (url.pathname === "/api/inventory/settings" && req.method === "POST") {
+          let body = "";
+          req.on("data", (chunk) => { body += chunk; });
+          req.on("end", async () => {
+            try {
+              const payload = JSON.parse(body || "{}");
+              const role = payload.role || (req.headers["x-user-role"] as string) || "";
+              const { isAuthorizedForMinStock } = await import("./server/medicineHandler.mjs");
+              if (!isAuthorizedForMinStock(role)) {
+                res.statusCode = 403;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({
+                  success: false,
+                  error: "Access Denied: Only Developer and Admin roles can modify Minimum Stock settings.",
+                }));
+                return;
+              }
+
+              const minStockFeature = Boolean(payload.minStockFeature);
+              try {
+                const { db, COLLECTIONS } = await import("./server/firebase.mjs");
+                const { doc, setDoc } = await import("firebase/firestore");
+                await setDoc(doc(db, COLLECTIONS.meta, "app"), { featureFlags: { minStockFeature } }, { merge: true });
+              } catch (dbErr) {
+                console.warn("[Vite flags update warning]", (dbErr as Error).message);
+              }
+
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({
+                success: true,
+                message: "Inventory control settings updated successfully",
+                minStockFeature,
+              }));
+            } catch (err: unknown) {
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false, error: (err as Error).message }));
             }
           });
           return;

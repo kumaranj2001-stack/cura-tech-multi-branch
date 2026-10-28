@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useStore, uid } from "../store/store";
-import { FileDown, Minus, Plus, Gauge, Pencil } from "lucide-react";
+import { FileDown, Minus, Plus } from "lucide-react";
 import { Card, CardBody, Input, Label, Button, Th, Td, Modal, Badge, EmptyState, Select } from "../components/ui";
 import { fmtCurrency, isExpired, daysToExpiry, downloadPDF, flashToast } from "../utils/helpers";
 import type { Medicine } from "../store/types";
@@ -41,8 +41,109 @@ interface InventoryProps {
   onConsumeFilter?: () => void;
 }
 
+interface MinStockInputCellProps {
+  medicine: Medicine;
+  canEdit: boolean;
+  onUpdate: (m: Medicine, val: number) => void;
+}
+
+const MinStockInputCell: React.FC<MinStockInputCellProps> = ({ medicine, canEdit, onUpdate }) => {
+  const currentMin = minStockOf(medicine);
+  const [val, setVal] = useState<string>(String(currentMin));
+
+  React.useEffect(() => {
+    setVal(String(currentMin));
+  }, [currentMin]);
+
+  const commit = (inputStr: string) => {
+    if (!canEdit) return;
+    const parsed = parseInt(inputStr, 10);
+    const finalVal = isNaN(parsed) || parsed < 0 ? 0 : Math.min(99999, parsed);
+    setVal(String(finalVal));
+    if (finalVal !== currentMin) {
+      onUpdate(medicine, finalVal);
+    }
+  };
+
+  const handleStep = (delta: number) => {
+    if (!canEdit) {
+      alert("Access restricted: Only Developer and Admin roles can customize Minimum Stock.");
+      return;
+    }
+    const next = Math.max(0, currentMin + delta);
+    setVal(String(next));
+    onUpdate(medicine, next);
+  };
+
+  const isLow = medicine.stock <= currentMin;
+
+  return (
+    <div className="inline-flex items-center gap-1 group/min">
+      <button
+        type="button"
+        disabled={!canEdit}
+        onClick={() => handleStep(-1)}
+        className={`w-6 h-6 rounded-md flex items-center justify-center transition-all ${
+          canEdit
+            ? "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-rose-100 hover:text-rose-600 dark:hover:bg-rose-900/40 active:scale-90 cursor-pointer"
+            : "bg-slate-100/50 dark:bg-slate-800/50 text-slate-400 dark:text-slate-600 cursor-not-allowed opacity-50"
+        }`}
+        title={canEdit ? "Decrease minimum stock by 1" : "Access restricted: Only Developer and Admin roles can customize Minimum Stock"}
+        aria-label="Decrease minimum stock by 1"
+      >
+        <Minus className="w-3 h-3" />
+      </button>
+
+      <input
+        type="number"
+        min={0}
+        max={99999}
+        step={1}
+        disabled={!canEdit}
+        value={val}
+        onChange={(e) => {
+          if (!canEdit) return;
+          setVal(e.target.value);
+        }}
+        onBlur={() => commit(val)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+        className={`w-14 h-6 text-center text-xs font-bold tabular-nums rounded-md px-1 border transition-colors focus:outline-none focus:ring-2 focus:ring-sky-400 ${
+          !canEdit
+            ? "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 cursor-not-allowed select-none"
+            : isLow
+            ? "bg-amber-50 dark:bg-amber-900/30 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300"
+            : "bg-slate-50 dark:bg-slate-700/40 border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200"
+        }`}
+        title={canEdit ? "Enter minimum stock threshold manually" : "Access restricted: Only Developer and Admin roles can customize Minimum Stock"}
+        aria-label={`Minimum stock for ${medicine.name}`}
+      />
+
+      <button
+        type="button"
+        disabled={!canEdit}
+        onClick={() => handleStep(1)}
+        className={`w-6 h-6 rounded-md flex items-center justify-center transition-all ${
+          canEdit
+            ? "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-emerald-100 hover:text-emerald-600 dark:hover:bg-emerald-900/40 active:scale-90 cursor-pointer"
+            : "bg-slate-100/50 dark:bg-slate-800/50 text-slate-400 dark:text-slate-600 cursor-not-allowed opacity-50"
+        }`}
+        title={canEdit ? "Increase minimum stock by 1" : "Access restricted: Only Developer and Admin roles can customize Minimum Stock"}
+        aria-label="Increase minimum stock by 1"
+      >
+        <Plus className="w-3 h-3" />
+      </button>
+    </div>
+  );
+};
+
 const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter }) => {
-  const { data, setData, log, flags } = useStore();
+  const { data, setData, log, flags, currentUser } = useStore();
+  const isDevOrAdmin = currentUser?.role === "developer" || currentUser?.role === "superadmin" || currentUser?.role === "admin";
+  const canCustomizeMinStock = Boolean(isDevOrAdmin);
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<InventoryFilter>(initialFilter || "all");
 
@@ -192,10 +293,32 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
   const grnOff = !flags.grnModule;
 
   /* quick-edit the low-stock threshold straight from the table */
-  const setMinStock = (m: Medicine, v: number) => {
-    const next = Math.max(0, Math.min(9999, Math.round(v)));
+  const setMinStock = async (m: Medicine, v: number) => {
+    if (!canCustomizeMinStock) {
+      alert("Access restricted: Only Developer and Admin accounts can customize Minimum Stock.");
+      return;
+    }
+    const next = Math.max(0, Math.min(99999, Math.round(v)));
     setData((d) => ({ ...d, medicines: d.medicines.map((x) => (x.id === m.id ? { ...x, minStock: next } : x)) }));
-    flashToast(`Min stock for ${m.name} set to ${next}`);
+    flashToast(`Min stock for ${m.name} set to ${next}`, "ok");
+
+    // Synchronize to backend
+    try {
+      await fetch(`/api/inventory/medicine/${m.id}/min-stock`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-role": currentUser?.role || "",
+        },
+        body: JSON.stringify({
+          minStock: next,
+          role: currentUser?.role || "",
+          medicines: data.medicines,
+        }),
+      });
+    } catch (apiErr) {
+      console.warn("[Backend minStock update warning]", apiErr);
+    }
   };
 
   const today = new Date().toISOString().slice(0, 10);
@@ -403,13 +526,12 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
                   <Th>Medicine</Th>
                   <Th>Batch</Th>
                   <Th>Stock</Th>
-                  <Th>Min Level</Th>
+                  {flags.minStockFeature !== false && <Th>Min Level</Th>}
                   <Th>Purchase</Th>
                   <Th>Selling</Th>
                   <Th>GST</Th>
                   <Th>Expiry</Th>
                   <Th>Status</Th>
-                  <Th className="text-right">Actions</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -425,27 +547,15 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
                       </Td>
                       <Td>{m.batch || <span className="text-slate-400">—</span>}</Td>
                       <Td className={m.stock <= minStockOf(m) ? "text-rose-600 font-semibold" : ""}>{m.stock}</Td>
-                      <Td>
-                        <div className="inline-flex items-center gap-1 group/min">
-                          <button
-                            onClick={() => setMinStock(m, minStockOf(m) - (minStockOf(m) >= 50 ? 10 : 5))}
-                            className="w-6 h-6 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-rose-100 hover:text-rose-600 dark:hover:bg-rose-900/40 active:scale-90 transition-all"
-                            title="Lower minimum"
-                          >
-                            <Minus className="w-3 h-3" />
-                          </button>
-                          <span className={`min-w-[2.25rem] text-center text-xs font-bold tabular-nums rounded-md px-1.5 py-1 border transition-colors ${m.stock <= minStockOf(m) ? "bg-amber-50 dark:bg-amber-900/30 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300" : "bg-slate-50 dark:bg-slate-700/40 border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200"}`}>
-                            <Gauge className="w-3 h-3 inline -mt-0.5 mr-0.5" />{minStockOf(m)}
-                          </span>
-                          <button
-                            onClick={() => setMinStock(m, minStockOf(m) + (minStockOf(m) >= 50 ? 10 : 5))}
-                            className="w-6 h-6 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center hover:bg-emerald-100 hover:text-emerald-600 dark:hover:bg-emerald-900/40 active:scale-90 transition-all"
-                            title="Raise minimum"
-                          >
-                            <Plus className="w-3 h-3" />
-                          </button>
-                        </div>
-                      </Td>
+                      {flags.minStockFeature !== false && (
+                        <Td>
+                          <MinStockInputCell
+                            medicine={m}
+                            canEdit={canCustomizeMinStock}
+                            onUpdate={setMinStock}
+                          />
+                        </Td>
+                      )}
                       <Td>{fmtCurrency(m.purchasePrice)}</Td>
                       <Td>{fmtCurrency(m.sellingPrice)}</Td>
                       <Td>{m.gst}%</Td>
@@ -454,16 +564,6 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
                         {exp ? <Badge tone="red">EXPIRED</Badge> : dte <= 90 ? <Badge tone="amber">{dte}d</Badge> : <Badge tone="green">OK</Badge>}
                         {m.stock === 0 && <Badge tone="red">OUT</Badge>}
                         {m.stock > 0 && m.stock <= minStockOf(m) && <Badge tone="amber">LOW</Badge>}
-                      </Td>
-                      <Td className="text-right">
-                        <button
-                          onClick={() => openEdit(m)}
-                          title="Edit Medicine"
-                          className="p-1.5 rounded-lg text-slate-500 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-slate-700 transition-colors inline-flex items-center gap-1 text-xs font-medium"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                          <span className="hidden sm:inline">Edit</span>
-                        </button>
                       </Td>
                     </tr>
                   );
@@ -568,17 +668,24 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
             </>
           )}
 
-          <div>
-            <Label>Minimum Stock *</Label>
-            <Input
-              type="number"
-              min={0}
-              value={form.minStock}
-              onChange={(e) => setForm({ ...form, minStock: e.target.value })}
-              placeholder="10"
-            />
-            <p className="text-[11px] text-slate-400 mt-1">Alerts trigger when stock falls to this level. Set 2–5 for small-pack drugs, 50+ for fast movers.</p>
-          </div>
+          {flags.minStockFeature !== false && (
+            <div>
+              <Label>Minimum Stock *</Label>
+              <Input
+                type="number"
+                min={0}
+                disabled={!canCustomizeMinStock}
+                value={form.minStock}
+                onChange={(e) => setForm({ ...form, minStock: e.target.value })}
+                placeholder="10"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">
+                {canCustomizeMinStock
+                  ? "Alerts trigger when stock falls to this level. Set 2–5 for small-pack drugs, 50+ for fast movers."
+                  : "Default: 10. (Access restricted: Only Developer and Admin roles can customize Minimum Stock)."}
+              </p>
+            </div>
+          )}
 
           <div className="relative">
             <Label>Supplier * (Existing Suppliers List Only)</Label>

@@ -2,7 +2,7 @@ import http from "node:http";
 import { parseInvoiceDocument } from "./intelligentParser.mjs";
 import { calculateBillingTotals } from "./billingCalculator.mjs";
 import { filterMedicines } from "./inventoryFilter.mjs";
-import { validateMedicinePayload, createMedicine, updateMedicine, deleteMedicine } from "./medicineHandler.mjs";
+import { validateMedicinePayload, createMedicine, updateMedicine, deleteMedicine, updateMedicineMinStock, isAuthorizedForMinStock } from "./medicineHandler.mjs";
 import { listApprovedGrns, updateApprovedGrn, deleteApprovedGrn, isDeveloperRole } from "./approvedGrnHandler.mjs";
 import { listDoctors, createDoctor, updateDoctor, deleteDoctor } from "./doctorHandler.mjs";
 import { db, COLLECTIONS, firebaseConfig } from "./firebase.mjs";
@@ -369,8 +369,9 @@ const server = http.createServer(async (req, res) => {
         const pathParts = url.pathname.split("/");
         const urlId = (url.pathname.includes("/update")) ? null : pathParts[pathParts.length - 1];
         const id = payload.id || urlId;
+        const role = payload.role || req.headers["x-user-role"] || "";
         const { patch, medicines = [] } = payload;
-        const result = updateMedicine(id, patch || payload, medicines);
+        const result = updateMedicine(id, patch || payload, medicines, role);
 
         // Update in Firestore gp_medicines
         try {
@@ -386,6 +387,95 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, result);
       } catch (err) {
         return sendJson(res, err.statusCode || 400, { success: false, error: err.message });
+      }
+    });
+    return;
+  }
+
+  // Inventory Medicine Min-Stock Patch Endpoint
+  if ((req.method === "PATCH" || req.method === "POST" || req.method === "PUT") &&
+      (url.pathname.includes("/min-stock") && (url.pathname.startsWith("/api/inventory/medicine/") || url.pathname.startsWith("/api/medicines/")))) {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 1024 * 1024) req.destroy();
+    });
+
+    req.on("end", async () => {
+      try {
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        const payload = JSON.parse(body);
+        const pathParts = url.pathname.split("/").filter(Boolean);
+        // e.g. ["api", "inventory", "medicine", "m_123", "min-stock"] -> id is index 3
+        const id = payload.id || pathParts[pathParts.length - 2];
+        const role = payload.role || req.headers["x-user-role"] || "";
+        const minStock = payload.minStock;
+        const medicines = payload.medicines || [];
+
+        const result = updateMedicineMinStock(id, minStock, role, medicines);
+
+        // Update in Firestore gp_medicines
+        try {
+          await setDoc(doc(db, COLLECTIONS.medicines, id), { minStock: result.medicine.minStock }, { merge: true });
+        } catch (dbErr) {
+          console.warn("[Firebase minStock update warning]", dbErr.message);
+        }
+
+        return sendJson(res, 200, result);
+      } catch (err) {
+        return sendJson(res, err.statusCode || 400, { success: false, error: err.message });
+      }
+    });
+    return;
+  }
+
+  // Inventory Control Feature Settings
+  if (req.method === "GET" && url.pathname === "/api/inventory/settings") {
+    try {
+      const metaSnap = await getDoc(doc(db, COLLECTIONS.meta, "app"));
+      const flags = metaSnap.exists() ? metaSnap.data()?.featureFlags || {} : {};
+      return sendJson(res, 200, {
+        success: true,
+        flags: { minStockFeature: flags.minStockFeature !== false },
+      });
+    } catch (err) {
+      return sendJson(res, 200, {
+        success: true,
+        flags: { minStockFeature: true },
+        warning: err.message,
+      });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/inventory/settings") {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", async () => {
+      try {
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        const payload = JSON.parse(body);
+        const role = payload.role || req.headers["x-user-role"] || "";
+        if (!isAuthorizedForMinStock(role)) {
+          return sendJson(res, 403, {
+            success: false,
+            error: "Access Denied: Only Developer and Admin roles can modify Minimum Stock settings.",
+          });
+        }
+
+        const minStockFeature = Boolean(payload.minStockFeature);
+        try {
+          await setDoc(doc(db, COLLECTIONS.meta, "app"), { featureFlags: { minStockFeature } }, { merge: true });
+        } catch (dbErr) {
+          console.warn("[Firebase flags update warning]", dbErr.message);
+        }
+
+        return sendJson(res, 200, {
+          success: true,
+          message: "Inventory control settings updated successfully",
+          minStockFeature,
+        });
+      } catch (err) {
+        return sendJson(res, 500, { success: false, error: err.message });
       }
     });
     return;

@@ -160,14 +160,76 @@ export function createMedicine(payload = {}, medicines = [], options = {}) {
 }
 
 /**
+ * Checks if a given role is authorized to customize Minimum Stock.
+ * Exclusively permits Developer and Admin roles (and superadmin).
+ *
+ * @param {string} role - The user role
+ * @returns {boolean}
+ */
+export function isAuthorizedForMinStock(role) {
+  const r = String(role || "").toLowerCase();
+  return r === "developer" || r === "superadmin" || r === "admin";
+}
+
+/**
+ * Updates the Minimum Stock threshold for a specific medicine.
+ * Enforces role-based access control exclusively for Developer and Admin roles.
+ *
+ * @param {string} id - Medicine ID
+ * @param {number|string} minStock - New minimum stock value
+ * @param {string} role - The user role
+ * @param {Array} medicines - Existing medicine list
+ * @returns {Object} { success: boolean, medicine: Object, medicines: Array }
+ */
+export function updateMedicineMinStock(id, minStock, role, medicines = []) {
+  if (!isAuthorizedForMinStock(role)) {
+    const err = new Error("Access Denied: Only Developer and Admin roles can customize Minimum Stock.");
+    err.statusCode = 403;
+    throw err;
+  }
+
+  const idx = medicines.findIndex((m) => m && m.id === id);
+  if (idx === -1) {
+    const err = new Error(`Medicine with ID '${id}' not found.`);
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const rawMin = Number(minStock);
+  if (isNaN(rawMin) || rawMin < 0) {
+    const err = new Error("Minimum Stock must be a valid non-negative integer.");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const parsedMinStock = Math.min(99999, Math.round(rawMin));
+  const current = medicines[idx];
+  const updatedMedicine = {
+    ...current,
+    minStock: parsedMinStock,
+    updatedAt: new Date().toISOString(),
+  };
+
+  const updatedList = [...medicines];
+  updatedList[idx] = updatedMedicine;
+
+  return {
+    success: true,
+    medicine: updatedMedicine,
+    medicines: updatedList,
+  };
+}
+
+/**
  * Updates an existing medicine entry.
  *
  * @param {string} id - Medicine ID
  * @param {Object} patch - Fields to update
  * @param {Array} medicines - Existing medicine list
+ * @param {string} [role] - User role attempting the update
  * @returns {Object} { success: boolean, medicine: Object, medicines: Array }
  */
-export function updateMedicine(id, patch = {}, medicines = []) {
+export function updateMedicine(id, patch = {}, medicines = [], role = "") {
   const idx = medicines.findIndex((m) => m && m.id === id);
   if (idx === -1) {
     const err = new Error(`Medicine with ID '${id}' not found.`);
@@ -176,6 +238,16 @@ export function updateMedicine(id, patch = {}, medicines = []) {
   }
 
   const current = medicines[idx];
+
+  // Restrict customizing minStock exclusively to Developer and Admin roles
+  if (patch.minStock !== undefined && patch.minStock !== current.minStock && role) {
+    if (!isAuthorizedForMinStock(role)) {
+      const err = new Error("Access Denied: Only Developer and Admin roles can customize Minimum Stock.");
+      err.statusCode = 403;
+      throw err;
+    }
+  }
+
   const merged = { ...current, ...patch };
 
   const validation = validateMedicinePayload(merged, { requirePurchaseDetails: false });

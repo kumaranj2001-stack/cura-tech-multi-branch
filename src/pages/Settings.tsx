@@ -8,17 +8,23 @@ import { isOverseer, STAFF_PLAN_OPTIONS, formatPlanCap, staffPlanLimits, DEFAULT
 import { parseBranchBackup } from "../store/store";
 import { FileDown, Upload, Package, Filter, BarChart3, LayoutDashboard, QrCode, Loader2, ShieldCheck, CreditCard, AlertTriangle, Clock, Sliders } from "lucide-react";
 
-const Toggle: React.FC<{ on: boolean; onChange: (v: boolean) => void; label: string; hint?: string }> = ({ on, onChange, label, hint }) => (
+const Toggle: React.FC<{ on: boolean; onChange: (v: boolean) => void; label: string; hint?: string; disabled?: boolean }> = ({ on, onChange, label, hint, disabled }) => (
   <button
     type="button"
-    onClick={() => onChange(!on)}
-    className="w-full flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-sky-300 dark:hover:border-sky-700 hover:shadow-sm transition-all text-left group"
+    disabled={disabled}
+    onClick={() => !disabled && onChange(!on)}
+    className={`w-full flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-left group transition-all ${
+      disabled
+        ? "opacity-60 cursor-not-allowed border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50"
+        : "hover:border-sky-300 dark:hover:border-sky-700 hover:shadow-sm"
+    }`}
   >
     <span className="min-w-0">
       <span className="block text-sm font-medium text-slate-800 dark:text-slate-200">{label}</span>
       {hint && <span className="block text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{hint}</span>}
+      {disabled && <span className="block text-[10px] text-amber-600 dark:text-amber-400 mt-0.5 font-medium">Developer & Admin roles only</span>}
     </span>
-    <span className={`relative shrink-0 w-11 h-6 rounded-full transition-colors duration-200 ${on ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-600"}`}>
+    <span className={`relative shrink-0 w-11 h-6 rounded-full transition-colors duration-200 ${on && !disabled ? "bg-emerald-500" : on ? "bg-emerald-300 dark:bg-emerald-800" : "bg-slate-300 dark:bg-slate-600"}`}>
       <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200 ${on ? "translate-x-5" : "translate-x-0"}`} />
     </span>
   </button>
@@ -123,6 +129,18 @@ const FLAG_GROUPS: {
     items: [
       { key: "prescriptionUpload", label: "Prescription upload", hint: "Attach prescription images / PDFs to patients" },
       { key: "narcoticPrescriptionRequired", label: "Mandatory prescription for narcotics", hint: "When disabled, waives mandatory prescription requirements for narcotic drugs" },
+    ],
+  },
+  {
+    title: "Inventory Control",
+    icon: Sliders,
+    note: "Restricted to Developer and Admin roles.",
+    items: [
+      {
+        key: "minStockFeature",
+        label: "Minimum Stock",
+        hint: "Controls visibility of Minimum Stock in the inventory table and Add Medicine modal",
+      },
     ],
   },
   {
@@ -910,10 +928,28 @@ const Settings: React.FC = () => {
                     ) : (
                       <Toggle
                         key={it.key}
-                        on={flags[it.key]}
+                        on={flags[it.key] !== false}
+                        disabled={it.key === "minStockFeature" && !(isDeveloper || isAdmin)}
                         label={it.label}
                         hint={it.hint}
                         onChange={(v) => {
+                          if (it.key === "minStockFeature") {
+                            if (!(isDeveloper || isAdmin)) {
+                              alert("Access restricted: Only Developer and Admin accounts can modify the Minimum Stock setting.");
+                              return;
+                            }
+                            setFlag("minStockFeature", v);
+                            flashToast(`Minimum Stock feature ${v ? "enabled" : "disabled"} on all devices`, v ? "ok" : "warn");
+                            fetch("/api/inventory/settings", {
+                              method: "POST",
+                              headers: {
+                                "Content-Type": "application/json",
+                                "x-user-role": currentUser?.role || "",
+                              },
+                              body: JSON.stringify({ minStockFeature: v, role: currentUser?.role || "" }),
+                            }).catch(() => {});
+                            return;
+                          }
                           if (it.key === "paymentsMaster") {
                             setFlag("paymentsMaster", v);
                             if (v && !flags.payDigital && !flags.payPos) {
