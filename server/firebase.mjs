@@ -1,14 +1,8 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore, initializeFirestore } from "firebase/firestore";
+import { config } from "./config.mjs";
 
-export const firebaseConfig = {
-  apiKey: process.env.VITE_FIREBASE_API_KEY || "AIzaSyCaQwOJk5LMsD8iqQymoUjpe8PvSyK2NJY",
-  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || "kumaran-5.firebaseapp.com",
-  projectId: process.env.VITE_FIREBASE_PROJECT_ID || "kumaran-5",
-  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET || "kumaran-5.firebasestorage.app",
-  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "852901647426",
-  appId: process.env.VITE_FIREBASE_APP_ID || "1:852901647426:web:207ee6ccba118b451d49db",
-};
+export const firebaseConfig = config.firebase;
 
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 

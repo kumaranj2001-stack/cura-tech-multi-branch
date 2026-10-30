@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
+import { config } from "./config.mjs";
 
-export const DEFAULT_OPENROUTER_API_KEY = "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";
 export const PRIMARY_MODEL = "google/gemini-2.5-flash";
 export const FALLBACK_MODEL = "openai/gpt-4o-mini";
 
@@ -264,10 +264,13 @@ export async function parseInvoiceDocument({
   mimeType = "application/pdf",
   existingMedicines = [],
   existingSuppliers = [],
-  apiKey = DEFAULT_OPENROUTER_API_KEY,
+  apiKey,
   model = PRIMARY_MODEL,
 }) {
-  const effectiveKey = apiKey || DEFAULT_OPENROUTER_API_KEY;
+  const effectiveKey = apiKey || config.openRouter.apiKey;
+  if (!effectiveKey) {
+    throw new Error("OpenRouter API key is not configured. Please set OPENROUTER_API_KEY in the server environment (.env).");
+  }
   const isPdf = fileName.toLowerCase().endsWith(".pdf") || mimeType === "application/pdf";
   const isExcel =
     fileName.toLowerCase().endsWith(".xlsx") ||

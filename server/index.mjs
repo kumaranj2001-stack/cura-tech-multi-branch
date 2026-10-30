@@ -5,7 +5,7 @@ import { filterMedicines } from "./inventoryFilter.mjs";
 import { validateMedicinePayload, createMedicine, updateMedicine, deleteMedicine, updateMedicineMinStock, isAuthorizedForMinStock } from "./medicineHandler.mjs";
 import { listApprovedGrns, updateApprovedGrn, deleteApprovedGrn, isDeveloperRole } from "./approvedGrnHandler.mjs";
 import { listDoctors, createDoctor, updateDoctor, deleteDoctor } from "./doctorHandler.mjs";
-import { listUsers, createUser, updateUser, deleteUser, validateUserPayload } from "./userHandler.mjs";
+import { listUsers, createUser, updateUser, deleteUser, validateUserPayload, sanitizeUserOutput } from "./userHandler.mjs";
 import { db, COLLECTIONS, firebaseConfig } from "./firebase.mjs";
 import { collection, doc, getDoc, getDocs, setDoc, deleteDoc } from "firebase/firestore";
 
@@ -815,6 +815,46 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // User Authentication Verification Endpoint
+  if (req.method === "POST" && (url.pathname === "/api/auth/verify" || url.pathname === "/api/auth/login")) {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", async () => {
+      try {
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        const { username = "", password = "" } = JSON.parse(body);
+        const cleanUser = String(username).trim().toLowerCase();
+        if (!cleanUser || !password) {
+          return sendJson(res, 400, { success: false, error: "Username and password required" });
+        }
+        const snap = await getDocs(collection(db, COLLECTIONS.users));
+        const matched = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .find((u) => String(u.username).trim().toLowerCase() === cleanUser);
+
+        if (!matched) {
+          return sendJson(res, 401, { success: false, error: "User not found" });
+        }
+        if (!matched.active) {
+          return sendJson(res, 403, { success: false, error: "Account is deactivated. Contact admin." });
+        }
+        if (matched.password !== password) {
+          return sendJson(res, 401, { success: false, error: "Incorrect password" });
+        }
+
+        const safeUser = sanitizeUserOutput(matched);
+        return sendJson(res, 200, {
+          success: true,
+          message: "Authentication successful",
+          user: safeUser,
+        });
+      } catch (err) {
+        return sendJson(res, 500, { success: false, error: err.message });
+      }
+    });
+    return;
+  }
+
   // User Management Endpoints
   if (req.method === "GET" && url.pathname === "/api/users") {
     const q = url.searchParams.get("q") || url.searchParams.get("search") || "";
@@ -824,11 +864,12 @@ const server = http.createServer(async (req, res) => {
       const snap = await getDocs(collection(db, COLLECTIONS.users));
       const firestoreDocs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       const result = listUsers(firestoreDocs, { q, branchId, role });
+      const sanitized = result.map((u) => sanitizeUserOutput(u));
       return sendJson(res, 200, {
         success: true,
         source: "firestore",
-        count: result.length,
-        users: result,
+        count: sanitized.length,
+        users: sanitized,
       });
     } catch (err) {
       return sendJson(res, 200, {

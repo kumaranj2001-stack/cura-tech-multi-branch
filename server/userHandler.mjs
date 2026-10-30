@@ -188,3 +188,17 @@ export function deleteUser(id, existingUsers = []) {
     users: nextUsers,
   };
 }
+
+/**
+ * Sanitizes user record for API output, masking passwords to protect user credentials.
+ */
+export function sanitizeUserOutput(user, options = {}) {
+  if (!user) return null;
+  const { includePassword = false } = options;
+  const output = { ...user };
+  if (!includePassword) {
+    output.password = "••••••••";
+  }
+  return output;
+}
+

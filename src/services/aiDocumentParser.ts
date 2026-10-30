@@ -2,9 +2,7 @@ import * as XLSX from "xlsx";
 import { parseImportFile } from "../utils/fileImport";
 import { validateBatchNumber } from "../utils/batchValidation";
 
-export const DEFAULT_OPENROUTER_KEY =
-  (import.meta.env.VITE_OPENROUTER_API_KEY as string) ||
-  "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";
+export const DEFAULT_OPENROUTER_KEY = "";
 
 export const PRIMARY_MODEL = "google/gemini-2.5-flash";
 export const FALLBACK_MODEL = "openai/gpt-4o-mini";
@@ -130,6 +128,9 @@ async function callOpenRouterDirectly(
   apiKey: string = DEFAULT_OPENROUTER_KEY,
   onStatusChange?: (status: string) => void
 ): Promise<ExtractedGrnInvoice> {
+  if (!apiKey) {
+    throw new Error("Direct client LLM requires an explicit user API key; routing to backend service.");
+  }
   const isPdf = file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf";
   const isExcel =
     file.name.toLowerCase().endsWith(".xlsx") ||
