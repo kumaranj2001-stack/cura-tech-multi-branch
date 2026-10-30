@@ -964,6 +964,323 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ── INVOICES / BILLING ENDPOINTS (Stores to Firestore gp_invoices) ──
+  if (req.method === "GET" && url.pathname === "/api/invoices") {
+    try {
+      const snap = await getDocs(collection(db, COLLECTIONS.invoices));
+      const branchId = url.searchParams.get("branchId");
+      let invoices = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      if (branchId) {
+        invoices = invoices.filter((inv) => !inv.branchId || inv.branchId === branchId);
+      }
+      invoices.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+      return sendJson(res, 200, { success: true, count: invoices.length, invoices });
+    } catch (err) {
+      return sendJson(res, 500, { success: false, error: err.message });
+    }
+  }
+
+  if (req.method === "POST" && (url.pathname === "/api/invoices" || url.pathname === "/api/invoices/create")) {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 10 * 1024 * 1024) req.destroy();
+    });
+    req.on("end", async () => {
+      try {
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        const payload = JSON.parse(body);
+        const invoiceData = payload.invoice || payload;
+        const id = invoiceData.id || `inv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const cleanInvoice = {
+          id,
+          number: invoiceData.number || String(Date.now()).slice(-6),
+          patientName: invoiceData.patientName || "Walk-in Customer",
+          patientPhone: invoiceData.patientPhone || "",
+          doctorId: invoiceData.doctorId || "",
+          doctorName: invoiceData.doctorName || "",
+          branchId: invoiceData.branchId || undefined,
+          items: Array.isArray(invoiceData.items) ? invoiceData.items : [],
+          subtotal: Number(invoiceData.subtotal) || 0,
+          discount: Number(invoiceData.discount) || 0,
+          discountType: invoiceData.discountType || "percent",
+          discountValue: Number(invoiceData.discountValue) || 0,
+          taxAmount: Number(invoiceData.taxAmount) || 0,
+          total: Number(invoiceData.total) || 0,
+          date: invoiceData.date || new Date().toISOString(),
+          createdBy: invoiceData.createdBy || "Staff",
+          paymentMethod: invoiceData.paymentMethod || "cash",
+          hasNarcotic: Boolean(invoiceData.hasNarcotic),
+        };
+
+        const docData = {};
+        for (const [k, v] of Object.entries(cleanInvoice)) {
+          if (v !== undefined) docData[k] = v;
+        }
+
+        await setDoc(doc(db, COLLECTIONS.invoices, id), docData);
+        return sendJson(res, 201, { success: true, invoice: cleanInvoice });
+      } catch (err) {
+        return sendJson(res, 500, { success: false, error: err.message });
+      }
+    });
+    return;
+  }
+
+  if ((req.method === "DELETE" && url.pathname.startsWith("/api/invoices/")) || (req.method === "POST" && url.pathname === "/api/invoices/delete")) {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", async () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const urlId = url.pathname.startsWith("/api/invoices/") && url.pathname !== "/api/invoices/delete"
+          ? url.pathname.replace("/api/invoices/", "")
+          : null;
+        const id = payload.id || urlId;
+        if (!id) return sendJson(res, 400, { success: false, error: "Invoice ID required" });
+        await deleteDoc(doc(db, COLLECTIONS.invoices, id));
+        return sendJson(res, 200, { success: true, message: `Invoice ${id} deleted successfully` });
+      } catch (err) {
+        return sendJson(res, 500, { success: false, error: err.message });
+      }
+    });
+    return;
+  }
+
+  // ── PATIENTS ENDPOINTS (Stores to Firestore gp_patients) ──
+  if (req.method === "GET" && url.pathname === "/api/patients") {
+    try {
+      const snap = await getDocs(collection(db, COLLECTIONS.patients));
+      const branchId = url.searchParams.get("branchId");
+      let patients = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      if (branchId) {
+        patients = patients.filter((p) => !p.branchId || p.branchId === branchId);
+      }
+      return sendJson(res, 200, { success: true, count: patients.length, patients });
+    } catch (err) {
+      return sendJson(res, 500, { success: false, error: err.message });
+    }
+  }
+
+  if (req.method === "POST" && (url.pathname === "/api/patients" || url.pathname === "/api/patients/create")) {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", async () => {
+      try {
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        const payload = JSON.parse(body);
+        const p = payload.patient || payload;
+        const name = String(p.name || "").trim();
+        const phone = String(p.phone || "").trim();
+        if (!name || !phone) return sendJson(res, 400, { success: false, error: "Patient name and phone are required" });
+        const id = p.id || `pat_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const cleanPatient = {
+          id,
+          name,
+          phone,
+          address: p.address || "",
+          doctorName: p.doctorName || "",
+          branchId: p.branchId || undefined,
+          prescriptionUrl: p.prescriptionUrl || "",
+          prescriptionName: p.prescriptionName || "",
+          prescriptionNumber: p.prescriptionNumber || "",
+          createdAt: p.createdAt || new Date().toISOString(),
+        };
+
+        const docData = {};
+        for (const [k, v] of Object.entries(cleanPatient)) {
+          if (v !== undefined) docData[k] = v;
+        }
+
+        await setDoc(doc(db, COLLECTIONS.patients, id), docData);
+        return sendJson(res, 201, { success: true, patient: cleanPatient });
+      } catch (err) {
+        return sendJson(res, 500, { success: false, error: err.message });
+      }
+    });
+    return;
+  }
+
+  if ((req.method === "DELETE" && url.pathname.startsWith("/api/patients/")) || (req.method === "POST" && url.pathname === "/api/patients/delete")) {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", async () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const urlId = url.pathname.startsWith("/api/patients/") && url.pathname !== "/api/patients/delete"
+          ? url.pathname.replace("/api/patients/", "")
+          : null;
+        const id = payload.id || urlId;
+        if (!id) return sendJson(res, 400, { success: false, error: "Patient ID required" });
+        await deleteDoc(doc(db, COLLECTIONS.patients, id));
+        return sendJson(res, 200, { success: true, message: `Patient ${id} deleted successfully` });
+      } catch (err) {
+        return sendJson(res, 500, { success: false, error: err.message });
+      }
+    });
+    return;
+  }
+
+  // ── SUPPLIERS ENDPOINTS (Stores to Firestore gp_suppliers) ──
+  if (req.method === "GET" && url.pathname === "/api/suppliers") {
+    try {
+      const snap = await getDocs(collection(db, COLLECTIONS.suppliers));
+      const suppliers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      return sendJson(res, 200, { success: true, count: suppliers.length, suppliers });
+    } catch (err) {
+      return sendJson(res, 500, { success: false, error: err.message });
+    }
+  }
+
+  if (req.method === "POST" && (url.pathname === "/api/suppliers" || url.pathname === "/api/suppliers/create")) {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", async () => {
+      try {
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        const payload = JSON.parse(body);
+        const s = payload.supplier || payload;
+        const name = String(s.name || "").trim();
+        if (!name) return sendJson(res, 400, { success: false, error: "Supplier name is required" });
+        const id = s.id || `sup_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const cleanSupplier = {
+          id,
+          name,
+          contact: s.contact || "",
+          address: s.address || "",
+          email: s.email || "",
+          gstNumber: s.gstNumber || "",
+          diNumber: s.diNumber || "",
+          fixedDiscount: Number(s.fixedDiscount) || 0,
+          branchId: s.branchId || undefined,
+        };
+
+        const docData = {};
+        for (const [k, v] of Object.entries(cleanSupplier)) {
+          if (v !== undefined) docData[k] = v;
+        }
+
+        await setDoc(doc(db, COLLECTIONS.suppliers, id), docData);
+        return sendJson(res, 201, { success: true, supplier: cleanSupplier });
+      } catch (err) {
+        return sendJson(res, 500, { success: false, error: err.message });
+      }
+    });
+    return;
+  }
+
+  if ((req.method === "DELETE" && url.pathname.startsWith("/api/suppliers/")) || (req.method === "POST" && url.pathname === "/api/suppliers/delete")) {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", async () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const urlId = url.pathname.startsWith("/api/suppliers/") && url.pathname !== "/api/suppliers/delete"
+          ? url.pathname.replace("/api/suppliers/", "")
+          : null;
+        const id = payload.id || urlId;
+        if (!id) return sendJson(res, 400, { success: false, error: "Supplier ID required" });
+        await deleteDoc(doc(db, COLLECTIONS.suppliers, id));
+        return sendJson(res, 200, { success: true, message: `Supplier ${id} deleted successfully` });
+      } catch (err) {
+        return sendJson(res, 500, { success: false, error: err.message });
+      }
+    });
+    return;
+  }
+
+  // ── BRANCHES ENDPOINTS (Stores to Firestore gp_branches) ──
+  if (req.method === "GET" && url.pathname === "/api/branches") {
+    try {
+      const snap = await getDocs(collection(db, COLLECTIONS.branches));
+      const branches = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      return sendJson(res, 200, { success: true, count: branches.length, branches });
+    } catch (err) {
+      return sendJson(res, 500, { success: false, error: err.message });
+    }
+  }
+
+  if (req.method === "POST" && (url.pathname === "/api/branches" || url.pathname === "/api/branches/create")) {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", async () => {
+      try {
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        const payload = JSON.parse(body);
+        const b = payload.branch || payload;
+        const name = String(b.name || "").trim();
+        const code = String(b.code || "").trim();
+        if (!name || !code) return sendJson(res, 400, { success: false, error: "Branch name and code are required" });
+        const id = b.id || `br_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const cleanBranch = {
+          id,
+          name,
+          code,
+          storeName: b.storeName || "",
+          address: b.address || "",
+          phone: b.phone || "",
+          active: b.active ?? true,
+          createdAt: b.createdAt || new Date().toISOString(),
+        };
+
+        const docData = {};
+        for (const [k, v] of Object.entries(cleanBranch)) {
+          if (v !== undefined) docData[k] = v;
+        }
+
+        await setDoc(doc(db, COLLECTIONS.branches, id), docData);
+        return sendJson(res, 201, { success: true, branch: cleanBranch });
+      } catch (err) {
+        return sendJson(res, 500, { success: false, error: err.message });
+      }
+    });
+    return;
+  }
+
+  // ── AUDIT LOG ENDPOINTS (Stores to Firestore gp_audit) ──
+  if (req.method === "GET" && url.pathname === "/api/audit") {
+    try {
+      const snap = await getDocs(collection(db, COLLECTIONS.audit));
+      let audit = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      audit.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+      return sendJson(res, 200, { success: true, count: audit.length, audit: audit.slice(0, 500) });
+    } catch (err) {
+      return sendJson(res, 500, { success: false, error: err.message });
+    }
+  }
+
+  if (req.method === "POST" && (url.pathname === "/api/audit" || url.pathname === "/api/audit/log")) {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", async () => {
+      try {
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        const payload = JSON.parse(body);
+        const entry = payload.entry || payload;
+        const id = entry.id || `a_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const cleanLog = {
+          id,
+          user: entry.user || "System",
+          action: entry.action || "EVENT",
+          details: entry.details || "",
+          timestamp: entry.timestamp || new Date().toISOString(),
+          branchId: entry.branchId || undefined,
+        };
+
+        const docData = {};
+        for (const [k, v] of Object.entries(cleanLog)) {
+          if (v !== undefined) docData[k] = v;
+        }
+
+        await setDoc(doc(db, COLLECTIONS.audit, id), docData);
+        return sendJson(res, 201, { success: true, entry: cleanLog });
+      } catch (err) {
+        return sendJson(res, 500, { success: false, error: err.message });
+      }
+    });
+    return;
+  }
+
   // Not found
   sendJson(res, 404, { success: false, error: `Route not found: ${req.method} ${url.pathname}` });
 });
