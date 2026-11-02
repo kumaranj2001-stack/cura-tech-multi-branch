@@ -23,7 +23,7 @@ function sendJson(res, statusCode, data) {
   res.end(JSON.stringify(data));
 }
 
-let currentStaffPlan = 1;
+let currentStaffPlan = 5;
 let customStaffPlanLimits = { superadmin: 1, admin: 2, staff: 5 };
 
 const server = http.createServer(async (req, res) => {
@@ -130,18 +130,14 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Staff plan API endpoints
+  // Staff plan API endpoints (Fully Customizable Account Plan)
   if (req.method === "GET" && url.pathname === "/api/staff-plan") {
     return sendJson(res, 200, {
       success: true,
       staffPlan: currentStaffPlan,
       customStaffPlanLimits,
       options: [
-        { tier: 1, label: "Option 1 — One admin, two staff", limits: { superadmin: 0, admin: 1, staff: 2 } },
-        { tier: 2, label: "Option 2 — Two admins, three staff", limits: { superadmin: 0, admin: 2, staff: 3 } },
-        { tier: 3, label: "Option 3 — Two admins, four staff", limits: { superadmin: 0, admin: 2, staff: 4 } },
-        { tier: 4, label: "Option 4 — Full roster", limits: { superadmin: 1, admin: 4, staff: "unlimited" } },
-        { tier: 5, label: "Option 5 — Fully Customizable", limits: customStaffPlanLimits },
+        { tier: 5, label: "Fully Customizable", limits: customStaffPlanLimits },
       ],
     });
   }
@@ -160,11 +156,7 @@ const server = http.createServer(async (req, res) => {
         const { staffPlan, customLimits } = payload;
 
         if (staffPlan !== undefined) {
-          const tier = Number(staffPlan);
-          if (![1, 2, 3, 4, 5].includes(tier)) {
-            return sendJson(res, 400, { success: false, error: "Invalid staff plan tier. Must be between 1 and 5." });
-          }
-          currentStaffPlan = tier;
+          currentStaffPlan = 5;
         }
 
         if (customLimits && typeof customLimits === "object") {

@@ -41,7 +41,12 @@ async function testStaffPlanEndpoints() {
   console.log("Custom Limits:", getRes.body.customStaffPlanLimits);
   console.log("Options Count:", getRes.body.options?.length);
 
-  // 2. POST /api/staff-plan with Option 5 and custom limits
+  if (getRes.body.options?.length !== 1 || getRes.body.options[0]?.label !== "Fully Customizable") {
+    console.error("Test failed: Options 1-4 should be removed and only 'Fully Customizable' should remain");
+    process.exit(1);
+  }
+
+  // 2. POST /api/staff-plan with Fully Customizable limits
   const postPayload = {
     staffPlan: 5,
     customLimits: {
@@ -60,7 +65,7 @@ async function testStaffPlanEndpoints() {
   console.log("Active Plan after update:", verifyRes.body.staffPlan);
   console.log("Custom Limits after update:", verifyRes.body.customStaffPlanLimits);
 
-  if (verifyRes.body.staffPlan === 5 && verifyRes.body.customStaffPlanLimits.admin === 6) {
+  if (verifyRes.body.staffPlan === 5 && verifyRes.body.customStaffPlanLimits.admin === 6 && verifyRes.body.options?.length === 1) {
     console.log("\n>>> ALL BACKEND STAFF PLAN TESTS PASSED SUCCESS! <<<");
   } else {
     console.error("Test failed to match expected values");

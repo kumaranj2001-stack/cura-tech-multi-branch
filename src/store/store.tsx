@@ -591,7 +591,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [staffPlan, setStaffPlanState] = useState<StaffPlanTier>(() => {
     try {
       const saved = Number(localStorage.getItem("gp_staff_plan"));
-      if (isStaffPlanTier(saved)) return saved;
+      if (saved === 5) return 5;
     } catch {}
     return DEFAULT_STAFF_PLAN;
   });
@@ -656,10 +656,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const setStaffPlan = useCallback((tier: StaffPlanTier, customLimits?: StaffPlanLimits) => {
     const role = actingRoleRef.current;
     if (role !== "developer" && role !== "superadmin") return;
-    if (!isStaffPlanTier(tier)) return;
-    setStaffPlanState(tier);
+    const targetTier: StaffPlanTier = 5;
+    setStaffPlanState(targetTier);
     try {
-      localStorage.setItem("gp_staff_plan", String(tier));
+      localStorage.setItem("gp_staff_plan", String(targetTier));
     } catch {}
     const activeCustom = customLimits || customStaffPlanLimitsRef.current;
     if (customLimits) {
@@ -668,9 +668,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         localStorage.setItem("gp_custom_staff_limits", JSON.stringify(customLimits));
       } catch {}
     }
-    if (!planAllowsMultiBranch(tier, activeCustom)) setViewBranchId(null);
+    if (!planAllowsMultiBranch(targetTier, activeCustom)) setViewBranchId(null);
     if (db) {
-      const payload: Record<string, unknown> = { staffPlan: tier };
+      const payload: Record<string, unknown> = { staffPlan: targetTier };
       if (customLimits) {
         payload.customStaffPlanLimits = customLimits;
       }
@@ -1222,12 +1222,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           };
           const ff = snapshot.data().featureFlags as Partial<FeatureFlags> | undefined;
           if (ff) setFlags({ ...DEFAULT_FEATURE_FLAGS, ...ff });
-          if (isStaffPlanTier(snapshot.data().staffPlan)) {
-            const nextPlan = snapshot.data().staffPlan;
+          if (snapshot.data().staffPlan !== undefined) {
+            const cloudPlan = snapshot.data().staffPlan;
+            const nextPlan: StaffPlanTier = 5;
             setStaffPlanState(nextPlan);
             try {
-              localStorage.setItem("gp_staff_plan", String(nextPlan));
+              localStorage.setItem("gp_staff_plan", "5");
             } catch {}
+            // Migrate legacy cloud plan (1..4) to 5 (Fully Customizable)
+            if (cloudPlan !== 5 && db) {
+              setDoc(doc(db, COLLECTIONS.meta, "app"), { staffPlan: 5 }, { merge: true }).catch(() => {});
+            }
             const customLim = snapshot.data().customStaffPlanLimits as StaffPlanLimits | undefined;
             if (customLim) {
               setCustomStaffPlanLimitsState(customLim);

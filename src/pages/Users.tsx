@@ -279,7 +279,7 @@ const Users: React.FC = () => {
                   : `Managing users for ${branchName(myBranchId)} only. Other branches are hidden.`}
               </div>
               <div className="text-[11px] text-slate-400 mt-1">
-                Plan Option {staffPlan}{staffPlan === 5 ? " (Custom)" : ""}: Super Admin {usedSuper}/{formatPlanCap(planLimits.superadmin)} · Admin {usedAdmin}/{formatPlanCap(planLimits.admin)} · Staff {usedStaff}/{formatPlanCap(planLimits.staff)}
+                Account Plan (Fully Customizable): Super Admin {usedSuper}/{formatPlanCap(planLimits.superadmin)} · Admin {usedAdmin}/{formatPlanCap(planLimits.admin)} · Staff {usedStaff}/{formatPlanCap(planLimits.staff)}
               </div>
             </div>
             <div className="flex flex-wrap sm:flex-nowrap gap-2 w-full sm:w-auto">
@@ -437,7 +437,7 @@ const Users: React.FC = () => {
                 {isDev && <option value="developer">Developer</option>}
               </Select>
               {isDev && (
-                <p className="text-[11px] text-violet-500 dark:text-violet-300 mt-1">Roles are limited by the active Staff Management option. Developer accounts are not counted.</p>
+                <p className="text-[11px] text-violet-500 dark:text-violet-300 mt-1">Roles are limited by the active Account Plan quotas. Developer accounts are not counted.</p>
               )}
               {isSuper && (
                 <p className="text-[11px] text-slate-400 mt-1">Super Admins can create roles permitted within the active plan limits.</p>

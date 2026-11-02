@@ -44,7 +44,7 @@ const Branches: React.FC = () => {
       log("BRANCH_UPDATE", form.name);
     } else {
       if (!canCreateBranch) {
-        alert("New branches are available only on the Full roster plan (Option 4).");
+        alert("New branches require at least 1 Super Admin account permitted in your Account Plan.");
         return;
       }
       if (data.branches.find((b) => b.code === form.code)) {

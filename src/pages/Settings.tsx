@@ -428,8 +428,8 @@ const Settings: React.FC = () => {
 
     setStaffPlan(5, newLimits);
     setCustomModalOpen(false);
-    log("STAFF_PLAN", `Option 5 configured: Super Admin ${formatPlanCap(newLimits.superadmin)}, Admin ${formatPlanCap(newLimits.admin)}, Staff ${formatPlanCap(newLimits.staff)}`);
-    flashToast("Option 5 — Fully Customizable limits saved and applied", "ok");
+    log("STAFF_PLAN", `Fully Customizable plan configured: Super Admin ${formatPlanCap(newLimits.superadmin)}, Admin ${formatPlanCap(newLimits.admin)}, Staff ${formatPlanCap(newLimits.staff)}`);
+    flashToast("Fully Customizable account limits saved and applied", "ok");
   };
   // Payments are branch-scoped: each branch's admin manages their own, or super admin selects branch
   const [selectedPayBranchId, setSelectedPayBranchId] = useState<string>(
@@ -635,7 +635,7 @@ const Settings: React.FC = () => {
         </CardBody>
       </Card>
 
-      {/* Staff Management — developer and super admin; one exclusive plan at a time */}
+      {/* Staff Management — developer and super admin */}
       {(isDevAccount || isSuperAdmin) && (
       <Card>
         <CardBody className="space-y-4">
@@ -643,7 +643,7 @@ const Settings: React.FC = () => {
             <div>
               <div className="font-semibold text-slate-800 dark:text-slate-100">👥 Staff Management</div>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Choose one account-creation plan. Enabling an option turns the others off. Admins can add staff only within the selected limits, on every plan.
+                Manage user account quotas for your pharmacy. Admins can add staff only within your configured limits.
               </p>
             </div>
             <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/30 px-2.5 py-1 text-[11px] font-semibold text-violet-700 dark:text-violet-300 shrink-0">
@@ -653,52 +653,38 @@ const Settings: React.FC = () => {
           <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5 bg-slate-50/60 dark:bg-slate-800/40 space-y-2">
             <div className="flex items-center gap-2 mb-1">
               <ShieldCheck className="w-4 h-4 text-sky-600 dark:text-sky-400" />
-              <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Account plans</span>
+              <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Account plan</span>
             </div>
             {STAFF_PLAN_OPTIONS.map((opt) => (
               <div key={opt.tier} className="space-y-1.5">
                 <Toggle
-                  on={staffPlan === opt.tier}
+                  on={true}
                   label={opt.label}
-                  hint={
-                    opt.tier === 5 && staffPlan === 5
-                      ? `Custom quotas: ${formatPlanCap(customStaffPlanLimits.superadmin)} Super Admin · ${formatPlanCap(customStaffPlanLimits.admin)} Admin · ${formatPlanCap(customStaffPlanLimits.staff)} Staff. Click 'Configure Limits' to modify.`
-                      : opt.hint
-                  }
-                  onChange={(v) => {
-                    if (opt.tier === 5) {
-                      openCustomizeModal();
-                      return;
-                    }
-                    if (!v || staffPlan === opt.tier) return;
-                    setStaffPlan(opt.tier);
-                    log("STAFF_PLAN", `Option ${opt.tier} selected`);
-                    flashToast(`${opt.label} is now the active plan on all devices`, "ok");
+                  hint={`Custom quotas: ${formatPlanCap(customStaffPlanLimits.superadmin)} Super Admin · ${formatPlanCap(customStaffPlanLimits.admin)} Admin · ${formatPlanCap(customStaffPlanLimits.staff)} Staff. Click 'Configure Limits' to modify.`}
+                  onChange={() => {
+                    openCustomizeModal();
                   }}
                 />
-                {opt.tier === 5 && staffPlan === 5 && (
-                  <div className="px-3 py-1 flex items-center justify-between text-xs">
-                    <span className="text-sky-700 dark:text-sky-300 font-medium">
-                      Active: {formatPlanCap(customStaffPlanLimits.superadmin)} Super Admin · {formatPlanCap(customStaffPlanLimits.admin)} Admin · {formatPlanCap(customStaffPlanLimits.staff)} Staff
-                    </span>
-                    <button
-                      type="button"
-                      onClick={openCustomizeModal}
-                      className="inline-flex items-center gap-1 font-semibold text-sky-600 hover:text-sky-700 dark:text-sky-400 hover:underline cursor-pointer"
-                    >
-                      <Sliders className="w-3.5 h-3.5" />
-                      Configure Limits
-                    </button>
-                  </div>
-                )}
+                <div className="px-3 py-1 flex items-center justify-between text-xs">
+                  <span className="text-sky-700 dark:text-sky-300 font-medium">
+                    Active: {formatPlanCap(customStaffPlanLimits.superadmin)} Super Admin · {formatPlanCap(customStaffPlanLimits.admin)} Admin · {formatPlanCap(customStaffPlanLimits.staff)} Staff
+                  </span>
+                  <button
+                    type="button"
+                    onClick={openCustomizeModal}
+                    className="inline-flex items-center gap-1 font-semibold text-sky-600 hover:text-sky-700 dark:text-sky-400 hover:underline cursor-pointer"
+                  >
+                    <Sliders className="w-3.5 h-3.5" />
+                    Configure Limits
+                  </button>
+                </div>
               </div>
             ))}
             <p className="mt-3 text-[11px] text-slate-400 dark:text-slate-500 flex items-start gap-1.5">
               <ShieldCheck className="w-3.5 h-3.5 mt-px shrink-0 text-teal-600 dark:text-teal-400" />
               {(() => {
                 const lim = staffPlanLimits(staffPlan, customStaffPlanLimits);
-                const optName = staffPlan === 5 ? "Option 5 (Fully Customizable)" : `Option ${staffPlan}`;
-                return `Active ${optName}: ${formatPlanCap(lim.superadmin)} super admin · ${formatPlanCap(lim.admin)} admin · ${formatPlanCap(lim.staff)} staff. Switching options is exclusive — only one can be on.`;
+                return `Active Account Plan (Fully Customizable): ${formatPlanCap(lim.superadmin)} super admin · ${formatPlanCap(lim.admin)} admin · ${formatPlanCap(lim.staff)} staff. Quotas can be configured at any time.`;
               })()}
             </p>
           </div>
@@ -706,11 +692,11 @@ const Settings: React.FC = () => {
       </Card>
       )}
 
-      {/* Option 5 Customization Modal */}
+      {/* Fully Customizable Account Plan Modal */}
       <Modal
         open={customModalOpen}
         onClose={() => setCustomModalOpen(false)}
-        title="Option 5 — Fully Customizable Account Plan"
+        title="Fully Customizable Account Plan"
         size="md"
       >
         <div className="space-y-5">
