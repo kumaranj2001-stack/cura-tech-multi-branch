@@ -20,7 +20,7 @@ export interface FirebaseConfig {
    not trivially readable from the bundle. Production deployments should still
    supply real environment variables via .env — see .env.example.            */
 const SCRAMBLED_FALLBACK =
-  "OHczMT8CMTwBCBJzfzk0ATgVKAUybHhbB3oOJhZ5PzgFPE5dZVhGJm0CNwUwH3dteGkQGmE0JzU+DTsoQlteEAxhPicsNzs1Kw4HHlRfMTAwICUsNTVTHFNdW2F5cDEkJj4gQEZ5VhR5dzk0OygmJE0fBRAaYSYmLiQoMyBhR1NZUzd3aGM9PDkkUVNeHwNtMzszMys1NkZBRF1EIjI3bzc5JGcPEF1XRTA0NSg4LgcgTVZVQH8nd2hjbnxmfBMDBgYBd2dkY3prNTVTe1QQDGFkaHlje211EgQEBQJxY2g2MytudxMFVVcAIDYwIGd4bCcXBwFWAnoxMGMr";
+  "OHczMT8CMTwBCBJzfzk0ATgULCIfG3VhX2EqLTcFYT0+dGJAWEBHEj4TeTgCODxQWV8QGmE0JzU+DTsoQlteEAxhNiczN2QgIEBaHV9DLyE7bDQ7NStAWh5UXzEwMCAlLDU1UxxTXVtheXAxJCY+IEBGeVYUeXcxNCQoeTFGUVgfWzY5Jih7KyYkTVFYEBphJiYuJCgzIGFHU1lTN3doYzU8JiQORlVRXm44Jy0iIHknUVNeUV5tMzszMys1NkZBRF1EIjI3bzc5JGcPEF1XRTA0NSg4LgcgTVZVQH8nd2hjYnxtfBsKAAUGdW1gY3prNTVTe1QQDGFkaHVjcG19GwIHAgB7Z2g2Mytud0VQVAEDImBrcWB+ZnQTUVMCVCA0YWMr";
 const SCRAMBLE_KEY = "CURAVITE#2026";
 
 function unscramble(encoded: string): Partial<FirebaseConfig> {

@@ -6,6 +6,7 @@ import { downloadJSON, flashToast, compressImageFile } from "../utils/helpers";
 import type { FeatureFlags, StaffPlanLimits } from "../store/types";
 import { isOverseer, STAFF_PLAN_OPTIONS, formatPlanCap, staffPlanLimits, DEFAULT_CUSTOM_STAFF_LIMITS } from "../store/types";
 import { parseBranchBackup } from "../store/store";
+import { firebaseConfig } from "../config/firebaseConfig";
 import { FileDown, Upload, Package, Filter, BarChart3, LayoutDashboard, QrCode, Loader2, ShieldCheck, CreditCard, AlertTriangle, Clock, Sliders, Trash2 } from "lucide-react";
 
 const Toggle: React.FC<{ on: boolean; onChange: (v: boolean) => void; label: string; hint?: string; disabled?: boolean }> = ({ on, onChange, label, hint, disabled }) => (
@@ -593,7 +594,7 @@ const Settings: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
             <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/30 p-3">
               <div className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">Project</div>
-              <div className="text-sm font-semibold text-slate-800 dark:text-slate-200 mt-0.5 truncate">kumaran-5</div>
+              <div className="text-sm font-semibold text-slate-800 dark:text-slate-200 mt-0.5 truncate">{firebaseConfig.projectId || "cura-tech-multi-branch"}</div>
             </div>
             <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/30 p-3">
               <div className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">Database</div>
@@ -618,7 +619,7 @@ const Settings: React.FC = () => {
               <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">One-time setup — 3 steps</span>
             </div>
             <ol className="p-4 space-y-2.5 text-sm text-slate-600 dark:text-slate-400 list-decimal list-inside">
-              <li>Open <b>Firebase Console → kumaran-5 → Firestore Database</b> and click <b>Create database</b> (choose Start in test mode).</li>
+              <li>Open <b>Firebase Console → {firebaseConfig.projectId || "cura-tech-multi-branch"} → Firestore Database</b> and click <b>Create database</b> (choose Start in test mode).</li>
               <li>In the <b>Rules</b> tab, replace everything with the rules below and press <b>Publish</b>.</li>
               <li>Reload this app on every device. Data now syncs everywhere automatically.</li>
             </ol>

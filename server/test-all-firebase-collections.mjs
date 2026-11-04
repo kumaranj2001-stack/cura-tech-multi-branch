@@ -1,14 +1,14 @@
 /**
  * Comprehensive Firebase Data Storage Verification Script
  * Validates that all entities (Users, Medicines, Invoices, Patients, Doctors, Suppliers, GRNs, Branches, Audit)
- * can be written to, queried from, and managed in the kumaran-5 Firebase project via the backend SDK.
+ * can be written to, queried from, and managed in the cura-tech-multi-branch Firebase project via the backend SDK.
  */
 
 import { db, COLLECTIONS, firebaseConfig } from "./firebase.mjs";
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs } from "firebase/firestore";
 
 async function runTests() {
-  console.log("=== Testing Firebase Backend Data Storage on kumaran-5 ===");
+  console.log("=== Testing Firebase Backend Data Storage on cura-tech-multi-branch ===");
   console.log("Project ID:", firebaseConfig.projectId);
   console.log("Auth Domain:", firebaseConfig.authDomain);
   console.log("Storage Bucket:", firebaseConfig.storageBucket);
@@ -157,7 +157,7 @@ async function runTests() {
   console.log("✓ Meta app settings verified! Counters:", metaSnap.data().counters);
 
   console.log("\n========================================================");
-  console.log("ALL FIREBASE DATA STORAGE TESTS PASSED ON kumaran-5!");
+  console.log("ALL FIREBASE DATA STORAGE TESTS PASSED ON cura-tech-multi-branch!");
   console.log("Backend and Firestore integration is 100% operational.");
   console.log("========================================================");
   process.exit(0);
