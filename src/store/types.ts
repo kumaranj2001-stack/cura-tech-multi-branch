@@ -43,6 +43,7 @@ export interface Medicine {
   gst: number;
   narcotic?: boolean;
   minStock?: number; // manual low-stock threshold (default 10)
+  createdAt?: string;
 }
 
 /* Per-medicine low-stock threshold — editable so small-pack drugs don't false-alarm */

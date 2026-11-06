@@ -98,6 +98,8 @@ const GRN: React.FC = () => {
             expiry: it.expiry,
             gst,
             supplier: g.supplierName,
+            branchId: meds[idx].branchId || g.branchId || "br_main",
+            createdAt: meds[idx].createdAt || new Date().toISOString(),
           };
         } else {
           const newM: Medicine = {
@@ -110,6 +112,8 @@ const GRN: React.FC = () => {
             expiry: it.expiry,
             gst,
             supplier: g.supplierName,
+            branchId: g.branchId || "br_main",
+            createdAt: new Date().toISOString(),
           };
           meds.push(newM);
         }

@@ -4,6 +4,7 @@ import {
   createMedicine,
   updateMedicine,
   deleteMedicine,
+  searchMedicines,
 } from "./medicineHandler.mjs";
 
 console.log("==========================================");
@@ -128,5 +129,31 @@ assert.equal(deleted.success, true);
 assert.equal(deleted.medicines.length, 1);
 assert.equal(deleted.medicines[0].id, "m_1");
 console.log("✓ Medicine deleted successfully");
+
+// 5. Search & indexing tests
+console.log("\n5. Testing searchMedicines indexing and auto-suggest...");
+const searchPool = [
+  { id: "m_1", name: "Dolo 650", batch: "B101", supplier: "Apex", purchasePrice: 10, sellingPrice: 20, stock: 50, branchId: "br_main" },
+  { id: "m_2", name: "Dolo 650", batch: "", supplier: "Apex", purchasePrice: 0, sellingPrice: 0, stock: 0, branchId: "br_main" },
+  { id: "m_3", name: "Paracetamol 500", batch: "P500", supplier: "Cipla", purchasePrice: 5, sellingPrice: 10, stock: 100, branchId: "br_main" },
+  { id: "m_4", name: "Amoxicillin 250", batch: "AMX1", supplier: "Sun Pharma", purchasePrice: 15, sellingPrice: 25, stock: 30, branchId: "br_north" },
+];
+
+const doloSearch = searchMedicines(searchPool, { q: "dolo" });
+assert.equal(doloSearch.length, 1);
+assert.equal(doloSearch[0].name, "Dolo 650");
+assert.equal(doloSearch[0].purchasePrice, 10);
+assert.equal(doloSearch[0].batch, "B101");
+console.log("✓ Dolo search deduplicated by name and kept richest entry");
+
+const batchSearch = searchMedicines(searchPool, { q: "AMX1" });
+assert.equal(batchSearch.length, 1);
+assert.equal(batchSearch[0].name, "Amoxicillin 250");
+console.log("✓ Search by batch code succeeded");
+
+const supplierSearch = searchMedicines(searchPool, { q: "cipla" });
+assert.equal(supplierSearch.length, 1);
+assert.equal(supplierSearch[0].name, "Paracetamol 500");
+console.log("✓ Search by supplier name succeeded");
 
 console.log("\nALL MEDICINE HANDLER UNIT TESTS PASSED!");

@@ -2,7 +2,7 @@ import http from "node:http";
 import { parseInvoiceDocument } from "./intelligentParser.mjs";
 import { calculateBillingTotals } from "./billingCalculator.mjs";
 import { filterMedicines } from "./inventoryFilter.mjs";
-import { validateMedicinePayload, createMedicine, updateMedicine, deleteMedicine, updateMedicineMinStock, isAuthorizedForMinStock } from "./medicineHandler.mjs";
+import { validateMedicinePayload, createMedicine, updateMedicine, deleteMedicine, updateMedicineMinStock, isAuthorizedForMinStock, searchMedicines } from "./medicineHandler.mjs";
 import { listApprovedGrns, updateApprovedGrn, deleteApprovedGrn, isDeveloperRole } from "./approvedGrnHandler.mjs";
 import { listDoctors, createDoctor, updateDoctor, deleteDoctor } from "./doctorHandler.mjs";
 import { listUsers, createUser, updateUser, deleteUser, validateUserPayload, sanitizeUserOutput } from "./userHandler.mjs";
@@ -284,16 +284,19 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Inventory Medicine List Endpoint
-  if (req.method === "GET" && (url.pathname === "/api/inventory/medicines" || url.pathname === "/api/medicines")) {
+  // Inventory Medicine List & Search Endpoint
+  if (req.method === "GET" && (url.pathname === "/api/inventory/medicines" || url.pathname === "/api/medicines" || url.pathname === "/api/inventory/search")) {
+    const q = url.searchParams.get("q") || url.searchParams.get("search") || "";
+    const branchId = url.searchParams.get("branchId") || "";
     try {
       const snap = await getDocs(collection(db, COLLECTIONS.medicines));
       const firestoreDocs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const result = searchMedicines(firestoreDocs, { q, branchId });
       return sendJson(res, 200, {
         success: true,
         source: "firestore",
-        count: firestoreDocs.length,
-        medicines: firestoreDocs,
+        count: result.length,
+        medicines: result,
       });
     } catch (err) {
       return sendJson(res, 200, {
@@ -304,6 +307,32 @@ const server = http.createServer(async (req, res) => {
         warning: err.message,
       });
     }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/inventory/search") {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", async () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        let { medicines = [], q = "", search = "", branchId = "" } = payload;
+        if (!medicines || medicines.length === 0) {
+          try {
+            const snap = await getDocs(collection(db, COLLECTIONS.medicines));
+            medicines = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          } catch {}
+        }
+        const result = searchMedicines(medicines, { q: q || search, branchId });
+        return sendJson(res, 200, {
+          success: true,
+          count: result.length,
+          medicines: result,
+        });
+      } catch (err) {
+        return sendJson(res, 400, { success: false, error: err.message });
+      }
+    });
+    return;
   }
 
   // Inventory Medicine Creation Endpoint

@@ -123,7 +123,8 @@ export function validateMedicinePayload(data = {}, options = {}) {
       gst: parsedGst,
       narcotic,
       minStock: parsedMinStock,
-      branchId: data.branchId ? String(data.branchId).trim() : undefined,
+      branchId: data.branchId ? String(data.branchId).trim() : (data.branch ? String(data.branch).trim() : "br_main"),
+      createdAt: data.createdAt ? String(data.createdAt).trim() : undefined,
     },
   };
 }
@@ -149,7 +150,8 @@ export function createMedicine(payload = {}, medicines = [], options = {}) {
   const newMedicine = {
     id: payload.id || `m_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     ...clean,
-    createdAt: new Date().toISOString(),
+    branchId: clean.branchId || "br_main",
+    createdAt: clean.createdAt || new Date().toISOString(),
   };
 
   return {
@@ -262,6 +264,8 @@ export function updateMedicine(id, patch = {}, medicines = [], role = "") {
     ...current,
     ...validation.cleanData,
     id,
+    branchId: validation.cleanData.branchId || current.branchId || "br_main",
+    createdAt: current.createdAt || validation.cleanData.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
 
@@ -273,6 +277,54 @@ export function updateMedicine(id, patch = {}, medicines = [], role = "") {
     medicine: updatedMedicine,
     medicines: updatedList,
   };
+}
+
+/**
+ * Searches and indexes medicines for auto-completion and synchronization.
+ * Supports matching by product name, batch number, or supplier.
+ * Deduplicates distinct items by name while preserving richest batch/price data.
+ *
+ * @param {Array} medicines
+ * @param {Object} options
+ * @returns {Array}
+ */
+export function searchMedicines(medicines = [], options = {}) {
+  const q = String(options.q || options.search || "").trim().toLowerCase();
+  const branchId = options.branchId ? String(options.branchId).trim() : null;
+
+  let filtered = Array.isArray(medicines) ? medicines : [];
+
+  if (branchId) {
+    filtered = filtered.filter((m) => !m.branchId || m.branchId === branchId || m.branchId === "br_main");
+  }
+
+  if (q) {
+    filtered = filtered.filter((m) => {
+      const name = String(m.name || "").toLowerCase();
+      const batch = String(m.batch || "").toLowerCase();
+      const supplier = String(m.supplier || "").toLowerCase();
+      return name.includes(q) || batch.includes(q) || supplier.includes(q);
+    });
+  }
+
+  // Deduplicate and index by lowercase name, keeping richest item
+  const map = new Map();
+  filtered.forEach((m) => {
+    const key = String(m.name || "").trim().toLowerCase();
+    if (!key) return;
+    if (!map.has(key)) {
+      map.set(key, m);
+    } else {
+      const existing = map.get(key);
+      const exScore = (existing.purchasePrice > 0 ? 2 : 0) + (existing.batch ? 1 : 0) + (existing.stock > 0 ? 1 : 0);
+      const curScore = (m.purchasePrice > 0 ? 2 : 0) + (m.batch ? 1 : 0) + (m.stock > 0 ? 1 : 0);
+      if (curScore > exScore) {
+        map.set(key, m);
+      }
+    }
+  });
+
+  return Array.from(map.values()).slice(0, 30);
 }
 
 /**

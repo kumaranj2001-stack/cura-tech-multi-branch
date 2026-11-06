@@ -148,19 +148,51 @@ function grnIntelligentParserPlugin(): Plugin {
           return;
         }
 
-        // Inventory Medicine List middleware
-        if ((url.pathname === "/api/inventory/medicines" || url.pathname === "/api/medicines") && req.method === "GET") {
+        // Inventory Medicine List & Search middleware
+        if ((url.pathname === "/api/inventory/medicines" || url.pathname === "/api/medicines" || url.pathname === "/api/inventory/search") && req.method === "GET") {
           try {
             const { db, COLLECTIONS } = await import("./server/firebase.mjs");
+            const { searchMedicines } = await import("./server/medicineHandler.mjs");
             const { getDocs, collection } = await import("firebase/firestore");
             const snap = await getDocs(collection(db, COLLECTIONS.medicines));
             const firestoreDocs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            const q = url.searchParams.get("q") || url.searchParams.get("search") || "";
+            const branchId = url.searchParams.get("branchId") || "";
+            const result = searchMedicines(firestoreDocs, { q, branchId });
             res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ success: true, source: "firestore", count: firestoreDocs.length, medicines: firestoreDocs }));
+            res.end(JSON.stringify({ success: true, source: "firestore", count: result.length, medicines: result }));
           } catch (err) {
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify({ success: true, source: "local", count: 0, medicines: [], warning: (err as Error).message }));
           }
+          return;
+        }
+
+        if (url.pathname === "/api/inventory/search" && req.method === "POST") {
+          let body = "";
+          req.on("data", (chunk) => { body += chunk; });
+          req.on("end", async () => {
+            try {
+              const payload = body ? JSON.parse(body) : {};
+              const { searchMedicines } = await import("./server/medicineHandler.mjs");
+              let { medicines = [], q = "", search = "", branchId = "" } = payload;
+              if (!medicines || medicines.length === 0) {
+                try {
+                  const { db, COLLECTIONS } = await import("./server/firebase.mjs");
+                  const { getDocs, collection } = await import("firebase/firestore");
+                  const snap = await getDocs(collection(db, COLLECTIONS.medicines));
+                  medicines = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+                } catch {}
+              }
+              const result = searchMedicines(medicines, { q: q || search, branchId });
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: true, count: result.length, medicines: result }));
+            } catch (err) {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false, error: (err as Error).message }));
+            }
+          });
           return;
         }
 

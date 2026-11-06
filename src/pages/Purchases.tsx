@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useStore, uid } from "../store/store";
 import {
   PackagePlus, Trash2, Save, RotateCcw, Search, Plus, Minus, ReceiptText, Layers, Percent, IndianRupee,
@@ -102,10 +102,43 @@ const Purchases: React.FC = () => {
   const [line, setLine] = useState<Line>(blankLine());
   const [productQuery, setProductQuery] = useState("");
   const [comboOpen, setComboOpen] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
+  const comboRef = useRef<HTMLDivElement | null>(null);
 
   /* product list */
   const [lines, setLines] = useState<Line[]>([]);
+
+  /* Remote medicines cache to ensure live backend synchronization */
+  const [remoteMeds, setRemoteMeds] = useState<Medicine[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/inventory/medicines")
+      .then((r) => r.json())
+      .then((res) => {
+        if (!cancelled && res.success && Array.isArray(res.medicines)) {
+          setRemoteMeds(res.medicines);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /* Close combobox on outside click */
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (comboRef.current && !comboRef.current.contains(e.target as Node)) {
+        setComboOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
   /* footer adjustments */
   const [deductions, setDeductions] = useState<GrnAdjustment[]>([]);
@@ -134,21 +167,49 @@ const Purchases: React.FC = () => {
   const [verifiedInvoiceNumber, setVerifiedInvoiceNumber] = useState("");
   const [verifiedDate, setVerifiedDate] = useState("");
 
-  /* Existing medicines from inventory only — distinct by name */
+  /* Combined inventory medicines (local store + synced remote) */
+  const allAvailableMeds = useMemo(() => {
+    const combined = [...data.medicines];
+    if (remoteMeds.length > 0) {
+      const existingIds = new Set(combined.map((m) => m.id));
+      remoteMeds.forEach((rm) => {
+        if (!existingIds.has(rm.id)) combined.push(rm);
+      });
+    }
+    return combined;
+  }, [data.medicines, remoteMeds]);
+
+  /* Distinct searchable index of medicines */
   const inventoryMedicines = useMemo(() => {
     const map = new Map<string, Medicine>();
-    data.medicines.forEach((m) => {
-      const key = m.name.trim().toLowerCase();
-      if (!map.has(key)) map.set(key, m);
+    const sorted = [...allAvailableMeds].sort((a, b) => {
+      const aScore = (a.purchasePrice > 0 ? 3 : 0) + (a.sellingPrice > 0 ? 2 : 0) + (a.batch ? 1 : 0);
+      const bScore = (b.purchasePrice > 0 ? 3 : 0) + (b.sellingPrice > 0 ? 2 : 0) + (b.batch ? 1 : 0);
+      if (bScore !== aScore) return bScore - aScore;
+      return (b.createdAt || "").localeCompare(a.createdAt || "");
+    });
+    sorted.forEach((m) => {
+      const key = (m.name || "").trim().toLowerCase();
+      if (!key) return;
+      if (!map.has(key)) {
+        map.set(key, m);
+      }
     });
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [data.medicines]);
+  }, [allAvailableMeds]);
 
   const productMatches = useMemo(() => {
-    const q = productQuery.trim().toLowerCase();
+    const q = (productQuery || line.name || "").trim().toLowerCase();
     if (!q) return [];
-    return inventoryMedicines.filter((m) => m.name.toLowerCase().includes(q)).slice(0, 15);
-  }, [productQuery, inventoryMedicines]);
+    return inventoryMedicines
+      .filter((m) => {
+        const nameMatch = m.name.toLowerCase().includes(q);
+        const batchMatch = Boolean(m.batch && m.batch.toLowerCase().includes(q));
+        const supplierMatch = Boolean(m.supplier && m.supplier.toLowerCase().includes(q));
+        return nameMatch || batchMatch || supplierMatch;
+      })
+      .slice(0, 15);
+  }, [productQuery, line.name, inventoryMedicines]);
 
   /* Handle file upload using OpenRouter Multimodal LLM */
   const onFiles = async (files: FileList | null) => {
@@ -299,13 +360,33 @@ const Purchases: React.FC = () => {
 
   /* Pick medicine from inventory combobox */
   const pickProduct = (m: Medicine) => {
-    setLine({
-      ...line,
+    // If supplier is specified on medicine and not yet set on GRN header, auto-select it
+    if (m.supplier && !supplierId) {
+      const matchSup = data.suppliers.find(
+        (s) => s.name.trim().toLowerCase() === m.supplier?.trim().toLowerCase()
+      );
+      if (matchSup) setSupplierId(matchSup.id);
+    }
+
+    const buyPrice = m.purchasePrice > 0 ? m.purchasePrice : line.purchasePrice;
+    const sellPrice = m.sellingPrice > 0 ? m.sellingPrice : line.mrpUnit;
+    const gstRate = TAX_OPTIONS.includes(m.gst) ? m.gst : (m.gst || 12);
+
+    setLine((prev) => ({
+      ...prev,
       name: m.name,
-      taxPct: TAX_OPTIONS.includes(m.gst) ? m.gst : 12,
-    });
-    setProductQuery("");
+      purchasePrice: buyPrice,
+      mrpUnit: sellPrice,
+      taxPct: gstRate,
+      batch: m.batch || prev.batch,
+      expiry: m.expiry || prev.expiry,
+      mfgDate: m.mfgDate || prev.mfgDate,
+      uomPerStrip: prev.uomPerStrip || 10,
+    }));
+    setProductQuery(m.name);
     setComboOpen(false);
+    setSelectedIndex(-1);
+    flashToast(`✓ Loaded "${m.name}" — Buy: ₹${buyPrice || 0}, MRP: ₹${sellPrice || 0}, GST: ${gstRate}%`, "ok");
   };
 
   const L = calcLine(line);
@@ -350,12 +431,14 @@ const Purchases: React.FC = () => {
       setLines((ls) => ls.map((x) => (x.id === editingLineId ? { ...line, id: editingLineId } : x)));
       setEditingLineId(null);
       setLine(blankLine());
+      setProductQuery("");
       notify("✓ Line updated in list");
       return;
     }
 
     setLines((ls) => [...ls, { ...line, id: uid("ln") }]);
     setLine(blankLine());
+    setProductQuery("");
     notify("✓ Line added to list");
   };
 
@@ -724,42 +807,116 @@ const Purchases: React.FC = () => {
           </div>
 
           {/* product combobox — inventory medicines */}
-          <div className="relative">
-            <Label>Product Name * (Select from Inventory or type to normalize)</Label>
+          <div className="relative" ref={comboRef}>
+            <div className="flex items-center justify-between mb-1">
+              <Label className="mb-0">Product Name * (Select from Inventory or type to normalize)</Label>
+              {inventoryMedicines.length > 0 && (
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {inventoryMedicines.length} inventory item{inventoryMedicines.length === 1 ? "" : "s"} indexed
+                </span>
+              )}
+            </div>
             <div className="relative">
               <input
                 className={inputCls + " pr-9"}
                 value={line.name || productQuery}
-                placeholder="Type 2+ letters to search inventory medicine..."
+                placeholder="Search inventory by medicine name, batch, or supplier..."
                 onChange={(e) => {
                   const v = e.target.value;
                   setProductQuery(v);
-                  setLine({ ...line, name: v });
+                  setLine((prev) => ({ ...prev, name: v }));
                   setComboOpen(true);
+                  setSelectedIndex(-1);
                 }}
                 onFocus={() => {
-                  if (productQuery.trim()) setComboOpen(true);
+                  setComboOpen(true);
+                }}
+                onKeyDown={(e) => {
+                  if (!comboOpen) {
+                    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                      setComboOpen(true);
+                    }
+                    return;
+                  }
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setSelectedIndex((prev) => (prev < productMatches.length - 1 ? prev + 1 : 0));
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setSelectedIndex((prev) => (prev > 0 ? prev - 1 : productMatches.length - 1));
+                  } else if (e.key === "Enter") {
+                    if (selectedIndex >= 0 && productMatches[selectedIndex]) {
+                      e.preventDefault();
+                      pickProduct(productMatches[selectedIndex]);
+                    }
+                  } else if (e.key === "Escape") {
+                    setComboOpen(false);
+                    setSelectedIndex(-1);
+                  }
                 }}
               />
               <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
 
-            {comboOpen && productMatches.length > 0 && (
-              <div className="absolute z-30 left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl">
-                {productMatches.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => pickProduct(m)}
-                    className="w-full text-left px-3 py-2 text-xs hover:bg-sky-50 dark:hover:bg-slate-700 flex items-center justify-between border-b border-slate-100 dark:border-slate-700/50 last:border-0"
-                  >
-                    <div>
-                      <div className="font-semibold text-slate-800 dark:text-slate-200">{m.name}</div>
-                      <div className="text-[11px] text-slate-400">Current Stock: {m.stock} · GST {m.gst}%</div>
+            {comboOpen && (
+              <div className="absolute z-50 left-0 right-0 mt-1 max-h-72 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl divide-y divide-slate-100 dark:divide-slate-700/60">
+                {productMatches.length > 0 ? (
+                  productMatches.map((m, idx) => {
+                    const isSelected = idx === selectedIndex;
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => pickProduct(m)}
+                        onMouseEnter={() => setSelectedIndex(idx)}
+                        className={`w-full text-left px-3.5 py-2.5 transition flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 ${
+                          isSelected
+                            ? "bg-sky-50 dark:bg-sky-900/40 border-l-4 border-sky-600 pl-2.5"
+                            : "hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-sm text-slate-800 dark:text-slate-100">{m.name}</span>
+                            {m.narcotic && (
+                              <Badge tone="red" className="text-[10px] px-1.5 py-0.5">Narcotic</Badge>
+                            )}
+                            {m.batch && (
+                              <span className="inline-flex items-center text-[11px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                                Batch: {m.batch}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
+                            <span>Stock: <b className="text-slate-700 dark:text-slate-200">{m.stock}</b></span>
+                            <span>•</span>
+                            <span>Buy: <b className="text-emerald-700 dark:text-emerald-400">₹{m.purchasePrice}</b></span>
+                            <span>•</span>
+                            <span>MRP: <b className="text-sky-700 dark:text-sky-400">₹{m.sellingPrice}</b></span>
+                            <span>•</span>
+                            <span>GST: {m.gst}%</span>
+                            {m.supplier && (
+                              <>
+                                <span>•</span>
+                                <span className="truncate max-w-[140px] text-slate-400">Supplier: {m.supplier}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <div className="shrink-0 flex items-center gap-1.5 self-end sm:self-center">
+                          <Badge tone="blue">Auto-fill ↵</Badge>
+                        </div>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="p-3.5 text-center text-xs text-slate-500 dark:text-slate-400">
+                    No matching inventory medicine for &quot;{(productQuery || line.name).trim()}&quot;.
+                    <div className="text-[11px] text-slate-400 mt-1">
+                      You can continue typing to log a new medicine stock directly.
                     </div>
-                    <Badge tone="blue">Select</Badge>
-                  </button>
-                ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -922,6 +1079,7 @@ const Purchases: React.FC = () => {
                 onClick={() => {
                   setLine(blankLine());
                   setEditingLineId(null);
+                  setProductQuery("");
                 }}
               >
                 Cancel Edit
@@ -1051,6 +1209,7 @@ const Purchases: React.FC = () => {
                             onClick={() => {
                               setLine({ ...l });
                               setEditingLineId(l.id);
+                              setProductQuery(l.name);
                               document.getElementById("grn-line-editor")?.scrollIntoView({ behavior: "smooth" });
                             }}
                             className="w-6 h-6 rounded-md bg-sky-100 dark:bg-sky-900/40 text-sky-600 dark:text-sky-300 hover:bg-sky-200 flex items-center justify-center transition"

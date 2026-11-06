@@ -203,6 +203,8 @@ export const ApprovedGrn: React.FC = () => {
                 expiry: it.expiry,
                 gst: totalGst(it),
                 supplier: updatedGrn.supplierName,
+                branchId: updatedGrn.branchId || "br_main",
+                createdAt: new Date().toISOString(),
               });
             }
           }

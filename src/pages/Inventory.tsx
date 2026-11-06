@@ -141,7 +141,7 @@ const MinStockInputCell: React.FC<MinStockInputCellProps> = ({ medicine, canEdit
 };
 
 const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter }) => {
-  const { data, setData, log, flags, currentUser } = useStore();
+  const { data, setData, log, flags, currentUser, currentBranch } = useStore();
   const isDevOrAdmin = currentUser?.role === "developer" || currentUser?.role === "superadmin" || currentUser?.role === "admin";
   const canCustomizeMinStock = Boolean(isDevOrAdmin);
   const [q, setQ] = useState("");
@@ -396,7 +396,12 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
     const parsedGst = form.gst === "" ? 0 : Number(form.gst);
     const parsedMinStock = form.minStock === "" ? 10 : Number(form.minStock);
 
-    const cleanMedicineData = {
+    const nowIso = new Date().toISOString();
+    const branchId = edit?.branchId || currentBranch?.id || currentUser?.branchId || "br_main";
+    const medId = edit?.id || uid("m");
+
+    const cleanMedicineData: Medicine = {
+      id: medId,
       name: form.name.trim(),
       supplier: form.supplier.trim(),
       batch: form.batch.trim(),
@@ -408,6 +413,8 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
       gst: parsedGst,
       narcotic: form.narcotic,
       minStock: parsedMinStock,
+      branchId,
+      createdAt: edit?.createdAt || nowIso,
     };
 
     if (edit) {
@@ -450,7 +457,9 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
         console.warn("[Backend Medicine Create Warning]", apiErr);
       }
 
-      const nm: Medicine = backendMedicine || { id: uid("m"), ...cleanMedicineData };
+      const nm: Medicine = backendMedicine
+        ? { ...backendMedicine, createdAt: backendMedicine.createdAt || nowIso, branchId: backendMedicine.branchId || branchId }
+        : cleanMedicineData;
       setData((d) => ({ ...d, medicines: [nm, ...d.medicines] }));
       log("MEDICINE_CREATE", `${cleanMedicineData.name} (${cleanMedicineData.batch})`);
       flashToast(`Medicine "${cleanMedicineData.name}" added to inventory`, "ok");

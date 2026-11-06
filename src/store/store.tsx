@@ -397,6 +397,23 @@ export interface CloudCutoffs {
   returnsClearedAt?: string | null;
 }
 
+export function getMedicineCreatedAt(m: Medicine): string {
+  if (m.createdAt) return m.createdAt;
+  const parts = (m.id || "").split("_");
+  if (parts.length >= 2) {
+    const raw = parts[1];
+    if (/^\d{10,}$/.test(raw)) {
+      const d = new Date(Number(raw));
+      if (!isNaN(d.getTime())) return d.toISOString();
+    }
+    const b36 = parseInt(raw.slice(0, 8), 36);
+    if (!isNaN(b36) && b36 > 1500000000000) {
+      return new Date(b36).toISOString();
+    }
+  }
+  return "";
+}
+
 function normalizeCloudData(
   slices: Partial<FirestoreSlices>,
   counters: AppData["counters"] | null,
@@ -412,7 +429,14 @@ function normalizeCloudData(
     ? allInvoices.filter((i) => i.date > cutoffs.invoicesClearedAt!)
     : allInvoices;
 
-  const allMedicines = [...((slices.medicines || []) as Medicine[])].sort((a, b) => a.name.localeCompare(b.name));
+  const allMedicines = [...((slices.medicines || []) as Medicine[])]
+    .map((m) => {
+      const createdAt = getMedicineCreatedAt(m) || new Date().toISOString();
+      const branchId = m.branchId || "br_main";
+      return { ...m, createdAt, branchId };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
   const medicines = cutoffs?.medicinesClearedAt
     ? allMedicines.filter((m) => Boolean(m.createdAt && m.createdAt > cutoffs.medicinesClearedAt!))
     : allMedicines;
