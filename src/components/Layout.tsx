@@ -71,6 +71,7 @@ const Layout: React.FC<{ page: PageId; setPage: (p: PageId) => void; children: R
     // hide Audit Log when logging is disabled
     if (!flags.auditEnabled && n.id === "audit") return false;
     if (n.id === "branches" && !multiBranch && currentUser?.role !== "developer") return false;
+    if (n.id === "privacy" && currentUser?.role === "developer") return false;
     if (isOverseer(currentUser?.role)) return true;
     if (currentUser?.role === "admin") {
       if (n.developerOnly) return false;
