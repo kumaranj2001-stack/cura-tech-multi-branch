@@ -569,8 +569,8 @@ const Settings: React.FC = () => {
         </CardBody>
       </Card>
 
-      {/* Cloud Backend — overseer only */}
-      {isOverseer(currentUser?.role) && (
+      {/* Cloud Backend — Developer only */}
+      {isDevAccount && (
         <>
       <Card>
         <CardBody>
@@ -636,8 +636,8 @@ const Settings: React.FC = () => {
         </CardBody>
       </Card>
 
-      {/* Staff Management — developer and super admin */}
-      {(isDevAccount || isSuperAdmin) && (
+      {/* Staff Management — developer only */}
+      {isDevAccount && (
       <Card>
         <CardBody className="space-y-4">
           <div className="flex items-start justify-between gap-3">
@@ -648,7 +648,7 @@ const Settings: React.FC = () => {
               </p>
             </div>
             <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/30 px-2.5 py-1 text-[11px] font-semibold text-violet-700 dark:text-violet-300 shrink-0">
-              {isDevAccount ? "Developer & Super Admin" : "Super Admin"}
+              Developer only
             </span>
           </div>
           <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5 bg-slate-50/60 dark:bg-slate-800/40 space-y-2">
@@ -1260,8 +1260,8 @@ const Settings: React.FC = () => {
       </Card>
       )}
 
-      {/* System Statistics — admin & developer only */}
-      {!isStaff && (
+      {/* System Statistics — developer only */}
+      {isDevAccount && (
       <Card>
         <CardBody>
           <div className="font-semibold text-slate-800 dark:text-slate-100 mb-2">📊 System Statistics</div>
@@ -1287,8 +1287,8 @@ const Settings: React.FC = () => {
       </Card>
       )}
 
-      {/* Business Data Reset — developer & superadmin only */}
-      {(currentUser?.role === "developer" || currentUser?.role === "superadmin") && (
+      {/* Business Data Reset — developer only */}
+      {isDevAccount && (
         <Card className="border border-rose-200 dark:border-rose-900 bg-rose-50/30 dark:bg-rose-950/20">
           <CardBody className="space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

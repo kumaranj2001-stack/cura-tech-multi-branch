@@ -121,6 +121,20 @@ if (!assignedUsersBlocked) throw new Error("Branch with assigned users was not b
 
 console.log("✓ Branch deletion correctly restricts to Developer and protects branches with assigned users!");
 
+// Test 9: Update protections
+console.log("\n9. Testing branch update/toggle protections...");
+let nonDevUpdateBlocked = false;
+try {
+  updateBranch("br_main", { name: "Hacked Branch" }, initialBranches, "superadmin");
+} catch (err) {
+  if (err.statusCode === 403) nonDevUpdateBlocked = true;
+}
+if (!nonDevUpdateBlocked) throw new Error("Superadmin was not blocked from updating branch!");
+
+const devUpdate = updateBranch("br_main", { name: "Updated Main HQ" }, initialBranches, "developer");
+if (devUpdate.branch.name !== "Updated Main HQ") throw new Error("Developer failed to update branch!");
+console.log("✓ Branch update/toggle correctly restricted to Developer only!");
+
 console.log("\n==========================================");
 console.log("ALL BRANCH HANDLER UNIT TESTS PASSED!");
 console.log("==========================================");

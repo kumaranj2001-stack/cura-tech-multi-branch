@@ -545,8 +545,8 @@ const server = http.createServer(async (req, res) => {
       try {
         const payload = body ? JSON.parse(body) : {};
         const role = payload.role || req.headers["x-user-role"] || "";
-        if (role && role !== "developer" && role !== "superadmin") {
-          return sendJson(res, 403, { success: false, error: "Access Denied: Only Developer or Super Admin can purge system data." });
+        if (role !== "developer") {
+          return sendJson(res, 403, { success: false, error: "Access Denied: Only Developer can purge system data." });
         }
 
         const now = new Date().toISOString();
@@ -882,10 +882,11 @@ const server = http.createServer(async (req, res) => {
     const q = url.searchParams.get("q") || url.searchParams.get("search") || "";
     const branchId = url.searchParams.get("branchId") || "";
     const role = url.searchParams.get("role") || "";
+    const callerRole = req.headers["x-user-role"] || url.searchParams.get("callerRole") || "";
     try {
       const snap = await getDocs(collection(db, COLLECTIONS.users));
       const firestoreDocs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const result = listUsers(firestoreDocs, { q, branchId, role });
+      const result = listUsers(firestoreDocs, { q, branchId, role }, callerRole);
       const sanitized = result.map((u) => sanitizeUserOutput(u));
       return sendJson(res, 200, {
         success: true,
@@ -959,6 +960,7 @@ const server = http.createServer(async (req, res) => {
           ? url.pathname.replace("/api/users/", "")
           : null;
         const id = payload.id || urlId;
+        const callerRole = payload.role || req.headers["x-user-role"] || url.searchParams.get("role") || "";
         let existingUsers = payload.users || [];
         if (!existingUsers || existingUsers.length === 0) {
           try {
@@ -967,7 +969,7 @@ const server = http.createServer(async (req, res) => {
           } catch {}
         }
 
-        const result = updateUser(id, payload.patch || payload, existingUsers);
+        const result = updateUser(id, payload.patch || payload, existingUsers, callerRole);
 
         // Update in Firestore gp_users
         try {
@@ -1002,6 +1004,7 @@ const server = http.createServer(async (req, res) => {
           ? url.pathname.replace("/api/users/", "")
           : null;
         const id = payload.id || urlId;
+        const callerRole = payload.role || req.headers["x-user-role"] || url.searchParams.get("role") || "";
         let existingUsers = payload.users || [];
         if (!existingUsers || existingUsers.length === 0) {
           try {
@@ -1010,7 +1013,7 @@ const server = http.createServer(async (req, res) => {
           } catch {}
         }
 
-        const result = deleteUser(id, existingUsers);
+        const result = deleteUser(id, existingUsers, callerRole);
 
         // Delete from Firestore gp_users
         try {

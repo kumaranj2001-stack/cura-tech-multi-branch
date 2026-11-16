@@ -1020,6 +1020,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [applyUpdate]);
 
   const purgeAllBusinessData = useCallback(async () => {
+    if (currentUserRef.current?.role !== "developer") {
+      flashToast("Access Denied: Only Developer can purge system data", "err");
+      return;
+    }
     const now = new Date().toISOString();
     applyUpdate((prev) => ({
       ...prev,
@@ -1093,6 +1097,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const updateUser = useCallback(async (id: string, patch: Partial<User>): Promise<User> => {
+    const isDev = currentUserRef.current?.role === "developer";
+    if (!isDev) {
+      const patchKeys = Object.keys(patch).filter((k) => k !== "id" && k !== "role");
+      const hasRestrictedField = patchKeys.some((k) => k !== "active");
+      if (hasRestrictedField) {
+        throw new Error("Access Denied: Only Developers can modify user credentials and profile details. Super Admins and Admins can only toggle active status.");
+      }
+    }
+
     const current = fullDataRef.current.users.find((u) => u.id === id);
     if (!current) throw new Error("User not found");
 
@@ -1138,8 +1151,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     try {
       await fetch(`/api/users/${id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-role": currentUserRef.current?.role || "",
+        },
+        body: JSON.stringify({ patch, role: currentUserRef.current?.role }),
       });
     } catch (err) {
       console.warn("[updateUser backend error]", err);
@@ -1149,6 +1165,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const deleteUser = useCallback(async (id: string): Promise<boolean> => {
+    if (currentUserRef.current?.role !== "developer") {
+      throw new Error("Access Denied: Only Developers can delete user profiles.");
+    }
+
     const target = fullDataRef.current.users.find((u) => u.id === id);
     if (!target) return true;
 
@@ -1183,6 +1203,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     try {
       await fetch(`/api/users/${id}`, {
         method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-role": currentUserRef.current?.role || "",
+        },
       });
     } catch (err) {
       console.warn("[deleteUser backend error]", err);

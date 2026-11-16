@@ -50,12 +50,17 @@ export function validateUserPayload(payload = {}, isUpdate = false) {
   };
 }
 
-export function listUsers(users = [], options = {}) {
+export function listUsers(users = [], options = {}, callerRole = "") {
   const { branchId, role, q = "" } = options;
   const search = String(q || "").trim().toLowerCase();
+  const isDevCaller = String(callerRole || "").trim().toLowerCase() === "developer";
 
   return (users || []).filter((u) => {
     if (!u) return false;
+    // Developer accounts must be entirely omitted from non-developer roles
+    if (!isDevCaller && (u.role === "developer" || u.username === "guru")) {
+      return false;
+    }
     if (branchId && branchId !== "all" && u.branchId !== branchId) return false;
     if (role && u.role !== role) return false;
     if (search) {
@@ -105,11 +110,23 @@ export function createUser(payload = {}, existingUsers = []) {
   };
 }
 
-export function updateUser(id, patch = {}, existingUsers = []) {
+export function updateUser(id, patch = {}, existingUsers = [], callerRole = "") {
   if (!id) {
     const err = new Error("User ID is required for update.");
     err.statusCode = 400;
     throw err;
+  }
+
+  const isDevCaller = String(callerRole || "").trim().toLowerCase() === "developer";
+  if (!isDevCaller) {
+    // Non-developers (Super Admin, Admin) are strictly capped at toggling account status between Active and Deactivated
+    const patchKeys = Object.keys(patch).filter((k) => k !== "role" && k !== "users" && k !== "id");
+    const hasRestrictedField = patchKeys.some((k) => k !== "active");
+    if (hasRestrictedField) {
+      const err = new Error("Access Denied: Only Developer can modify user credentials and profile details. Super Admins and Admins can only toggle active status.");
+      err.statusCode = 403;
+      throw err;
+    }
   }
 
   const userIndex = existingUsers.findIndex((u) => u && u.id === id);
@@ -158,10 +175,17 @@ export function updateUser(id, patch = {}, existingUsers = []) {
   };
 }
 
-export function deleteUser(id, existingUsers = []) {
+export function deleteUser(id, existingUsers = [], callerRole = "") {
   if (!id) {
     const err = new Error("User ID is required for deletion.");
     err.statusCode = 400;
+    throw err;
+  }
+
+  const isDevCaller = String(callerRole || "").trim().toLowerCase() === "developer";
+  if (!isDevCaller) {
+    const err = new Error("Access Denied: Only Developer can delete user profiles.");
+    err.statusCode = 403;
     throw err;
   }
 

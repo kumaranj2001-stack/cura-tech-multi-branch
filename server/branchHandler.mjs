@@ -73,10 +73,9 @@ export function createBranch(payload, existingBranches = [], role = "") {
 }
 
 export function updateBranch(id, patch, existingBranches = [], role = "") {
-  // Only developer or superadmin (for store profile) can update
-  const normalizedRole = String(role || "").trim().toLowerCase();
-  if (normalizedRole !== "developer" && normalizedRole !== "superadmin") {
-    const err = new Error("Access Denied: Only Developer or Super Admin can modify branch information.");
+  // Only developer can update or toggle branches
+  if (!isBranchCreatorRole(role)) {
+    const err = new Error("Access Denied: Only Developer can modify branch details or change active status.");
     err.statusCode = 403;
     throw err;
   }
@@ -88,14 +87,9 @@ export function updateBranch(id, patch, existingBranches = [], role = "") {
     throw err;
   }
 
-  // If code is being changed, ensure only developer can change code and check uniqueness
+  // If code is being changed, ensure uniqueness
   const updatedCode = patch.code ? String(patch.code).trim().toUpperCase() : current.code;
   if (patch.code && updatedCode !== current.code) {
-    if (normalizedRole !== "developer") {
-      const err = new Error("Access Denied: Only Developer can change branch codes.");
-      err.statusCode = 403;
-      throw err;
-    }
     const duplicate = existingBranches.find((b) => b.id !== id && b.code?.toUpperCase() === updatedCode);
     if (duplicate) {
       const err = new Error(`Branch code "${updatedCode}" is already in use by another branch.`);

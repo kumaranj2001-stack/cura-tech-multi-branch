@@ -1,6 +1,6 @@
 import { validateUserPayload, listUsers, createUser, updateUser, deleteUser } from "./userHandler.mjs";
 
-console.log("=== Testing User Management Handler ===");
+console.log("=== Testing User Management Handler & RBAC ===");
 
 // 1. Validation tests
 console.log("1. Testing validation...");
@@ -45,44 +45,89 @@ try {
 console.assert(duplicateFailed, "Duplicate username must throw error");
 console.log("✓ Duplicate username correctly rejected");
 
-// 3. Update User
-console.log("\n3. Testing user updates (name, username, password)...");
-const updateRes = updateUser(createRes.user.id, {
+// 3. Update User - Developer vs Super Admin / Admin
+console.log("\n3. Testing user updates (Developer full edit vs Superadmin active toggle only)...");
+
+// Non-developer attempting to change name/password/username must be blocked
+let saDetailEditBlocked = false;
+try {
+  updateUser(createRes.user.id, { name: "Hacked by Admin", password: "newpassword" }, createRes.users, "superadmin");
+} catch (e) {
+  if (e.statusCode === 403 && e.message.includes("Only Developer can modify user credentials")) {
+    saDetailEditBlocked = true;
+  }
+}
+console.assert(saDetailEditBlocked, "Non-developer detail edit must be rejected with 403");
+console.log("✓ Non-developer credential/profile modification blocked with 403 as expected!");
+
+// Non-developer toggling active status ONLY must succeed
+const saToggleRes = updateUser(createRes.user.id, { active: false }, createRes.users, "superadmin");
+console.assert(saToggleRes.success === true && saToggleRes.user.active === false, "Superadmin should be able to toggle active");
+console.log("✓ Superadmin successfully toggled user active status!");
+
+// Developer full update
+const devUpdateRes = updateUser(createRes.user.id, {
   name: "Updated Staff Name",
   username: "staff_renamed",
   password: "newsecretpassword",
-  active: false,
-}, createRes.users);
+  active: true,
+}, createRes.users, "developer");
 
-console.assert(updateRes.success === true, "Update should succeed");
-console.assert(updateRes.user.name === "Updated Staff Name", "Name should be updated");
-console.assert(updateRes.user.username === "staff_renamed", "Username should be updated");
-console.assert(updateRes.user.password === "newsecretpassword", "Password should be updated");
-console.assert(updateRes.user.active === false, "Active status should be updated");
-console.log("✓ User name, username, password, and active status updated successfully");
+console.assert(devUpdateRes.success === true, "Developer update should succeed");
+console.assert(devUpdateRes.user.name === "Updated Staff Name", "Name should be updated");
+console.assert(devUpdateRes.user.username === "staff_renamed", "Username should be updated");
+console.assert(devUpdateRes.user.password === "newsecretpassword", "Password should be updated");
+console.log("✓ Developer user full update succeeded!");
 
-// 4. Delete User
-console.log("\n4. Testing user deletion...");
-const deleteRes = deleteUser(createRes.user.id, updateRes.users);
-console.assert(deleteRes.success === true, "Deletion should succeed");
+// 4. Delete User - Developer only
+console.log("\n4. Testing user deletion RBAC...");
+let saDeleteBlocked = false;
+try {
+  deleteUser(createRes.user.id, devUpdateRes.users, "superadmin");
+} catch (e) {
+  if (e.statusCode === 403 && e.message.includes("Only Developer can delete user profiles")) {
+    saDeleteBlocked = true;
+  }
+}
+console.assert(saDeleteBlocked, "Non-developer user delete must be blocked with 403");
+console.log("✓ Superadmin/Admin blocked from deleting users!");
+
+// Developer delete succeeds
+const deleteRes = deleteUser(createRes.user.id, devUpdateRes.users, "developer");
+console.assert(deleteRes.success === true, "Deletion should succeed for developer");
 console.assert(deleteRes.users.length === 2, "Users length should decrease to 2");
 console.assert(!deleteRes.users.find(u => u.id === createRes.user.id), "Deleted user must not be present");
-console.log("✓ User deleted successfully and removed from list");
+console.log("✓ User deleted successfully by Developer!");
 
 // Cannot delete primary developer
 let devDeleteBlocked = false;
 try {
-  deleteUser("u_dev", deleteRes.users);
+  deleteUser("u_dev", deleteRes.users, "developer");
 } catch (e) {
   devDeleteBlocked = true;
 }
 console.assert(devDeleteBlocked, "Deleting primary developer must be blocked");
 console.log("✓ Primary developer deletion protected");
 
-// 5. List & filter
-console.log("\n5. Testing user listing & filters...");
-const searchRes = listUsers(deleteRes.users, { q: "admin" });
-console.assert(searchRes.length === 1 && searchRes[0].username === "admin1", "Search by query should work");
-console.log("✓ User listing and search filtering verified");
+// 5. List & filter (Developer account omission for non-developers)
+console.log("\n5. Testing user listing & Developer account omission...");
+
+// Superadmin listing: Developer accounts MUST be omitted
+const saUsers = listUsers(deleteRes.users, {}, "superadmin");
+const devInSaView = saUsers.some((u) => u.role === "developer" || u.username === "guru");
+console.assert(!devInSaView, "Developer accounts must NOT be visible to Superadmin!");
+console.log("✓ Developer accounts completely omitted from Super Admin view!");
+
+// Admin listing: Developer accounts MUST be omitted
+const admUsers = listUsers(deleteRes.users, {}, "admin");
+const devInAdmView = admUsers.some((u) => u.role === "developer" || u.username === "guru");
+console.assert(!devInAdmView, "Developer accounts must NOT be visible to Admin!");
+console.log("✓ Developer accounts completely omitted from Admin view!");
+
+// Developer listing: Developer accounts MUST be visible
+const devUsers = listUsers(deleteRes.users, {}, "developer");
+const devInDevView = devUsers.some((u) => u.role === "developer" || u.username === "guru");
+console.assert(devInDevView, "Developer accounts must be visible to Developer!");
+console.log("✓ Developer accounts visible to Developer role!");
 
 console.log("\nALL USER MANAGEMENT HANDLER TESTS PASSED!");

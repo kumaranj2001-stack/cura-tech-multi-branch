@@ -48,6 +48,10 @@ const Branches: React.FC = () => {
   };
 
   const openEdit = (b: Branch) => {
+    if (!isDeveloper) {
+      flashToast("Access Denied: Only Developer can edit branch details", "err");
+      return;
+    }
     setEdit(b);
     setForm({
       name: b.name,
@@ -73,7 +77,12 @@ const Branches: React.FC = () => {
     setLoading(true);
 
     if (edit) {
-      // Editing existing branch
+      // Editing existing branch — strictly restricted to Developer
+      if (!isDeveloper) {
+        setLoading(false);
+        flashToast("Access Denied: Only Developer can edit branch details", "err");
+        return;
+      }
       try {
         await fetch(`/api/branches/${edit.id}`, {
           method: "PUT",
@@ -185,6 +194,10 @@ const Branches: React.FC = () => {
   };
 
   const toggleActive = async (b: Branch) => {
+    if (!isDeveloper) {
+      flashToast("Access Denied: Only Developer can deactivate or activate branches", "err");
+      return;
+    }
     if (b.id === currentUser?.branchId) {
       alert("Cannot deactivate your own branch");
       return;
@@ -264,12 +277,6 @@ const Branches: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-            {!isDeveloper && (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-700/60 border border-slate-200 dark:border-slate-600 text-xs text-slate-600 dark:text-slate-300 font-medium">
-                <ShieldCheck className="w-3.5 h-3.5 text-sky-500" />
-                Branch Adding: Developer Only
-              </span>
-            )}
             {isDeveloper && (
               <Button onClick={openNew} className="w-full sm:w-auto flex items-center justify-center gap-1.5 shadow-sm">
                 <Plus className="w-4 h-4" />
@@ -289,7 +296,7 @@ const Branches: React.FC = () => {
                 message={
                   isDeveloper
                     ? "No branches yet. Click '+ New Branch' to create one."
-                    : "No branches configured yet. Branches can only be added by a Developer account."
+                    : "No branches configured yet."
                 }
               />
             </CardBody>
@@ -339,19 +346,19 @@ const Branches: React.FC = () => {
                 <div className="text-[11px] text-slate-400">
                   Created: {new Date(b.createdAt).toLocaleDateString("en-IN")}
                 </div>
-                <div className="flex items-center gap-1">
-                  <Button size="sm" variant="ghost" onClick={() => openEdit(b)} title="Edit branch profile" aria-label="Edit branch profile">
-                    ✏️
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => toggleActive(b)} title={b.active ? "Deactivate branch" : "Activate branch"} aria-label={b.active ? "Deactivate branch" : "Activate branch"}>
-                    {b.active ? "🚫" : "✅"}
-                  </Button>
-                  {isDeveloper && (
+                {isDeveloper && (
+                  <div className="flex items-center gap-1">
+                    <Button size="sm" variant="ghost" onClick={() => openEdit(b)} title="Edit branch profile" aria-label="Edit branch profile">
+                      ✏️
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => toggleActive(b)} title={b.active ? "Deactivate branch" : "Activate branch"} aria-label={b.active ? "Deactivate branch" : "Activate branch"}>
+                      {b.active ? "🚫" : "✅"}
+                    </Button>
                     <Button size="sm" variant="ghost" onClick={() => remove(b)} title="Delete branch" aria-label="Delete branch" className="text-rose-600 hover:text-rose-700">
                       🗑️
                     </Button>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             </CardBody>
           </Card>

@@ -42,12 +42,17 @@ const Users: React.FC = () => {
   const branchName = (id?: string) => data.branches.find((b) => b.id === id)?.name || "Unassigned";
 
   const visibleUsers = useMemo(() => {
+    let list = data.users;
+    // Developer accounts must be entirely omitted from the view of Super Admins, Admins, and Staff
+    if (!isDev) {
+      list = list.filter((u) => u.role !== "developer" && u.username !== "guru");
+    }
     if (isDeveloper) {
-      return branchFilter === "all" ? data.users : data.users.filter((u) => u.branchId === branchFilter);
+      return branchFilter === "all" ? list : list.filter((u) => u.branchId === branchFilter);
     }
     // Admin sees only users explicitly assigned to their own branch (plus themselves)
-    return data.users.filter((u) => u.branchId === myBranchId || u.id === currentUser?.id);
-  }, [data.users, isDeveloper, branchFilter, myBranchId, currentUser?.id]);
+    return list.filter((u) => u.branchId === myBranchId || u.id === currentUser?.id);
+  }, [data.users, isDev, isDeveloper, branchFilter, myBranchId, currentUser?.id]);
 
   if (currentUser?.role !== "admin" && !isOverseer(currentUser?.role)) {
     return (
@@ -84,12 +89,8 @@ const Users: React.FC = () => {
   };
 
   const openEdit = (u: User) => {
-    if (currentUser?.role === "admin" && u.role !== "staff") {
-      alert("Admins can only edit Staff accounts. Contact the Super Admin or Developer.");
-      return;
-    }
-    if (protectedFromMe(u)) {
-      alert("Only the Developer can manage Developer and Super Admin accounts.");
+    if (!isDev) {
+      flashToast("Access Denied: Only Developer can edit user details", "err");
       return;
     }
     setEdit(u);
@@ -123,12 +124,8 @@ const Users: React.FC = () => {
     try {
       setSubmitting(true);
       if (edit) {
-        if (currentUser?.role === "admin" && edit.role !== "staff") {
-          alert("Admins can only edit Staff accounts. Contact the Super Admin or Developer.");
-          return;
-        }
-        if (protectedFromMe(edit)) {
-          alert("Only the Developer can manage Developer and Super Admin accounts.");
+        if (!isDev) {
+          flashToast("Access Denied: Only Developer can edit user profiles", "err");
           return;
         }
         if (cleanForm.role !== edit.role) {
@@ -204,12 +201,8 @@ const Users: React.FC = () => {
   };
 
   const remove = async (u: User) => {
-    if (currentUser?.role === "admin" && u.role !== "staff") {
-      alert("Admins can only delete Staff accounts.");
-      return;
-    }
-    if (protectedFromMe(u)) {
-      alert("Only the Developer can delete Developer and Super Admin accounts.");
+    if (!isDev) {
+      flashToast("Access Denied: Only Developer can delete user profiles", "err");
       return;
     }
     if (u.id === currentUser?.id) {
@@ -231,17 +224,13 @@ const Users: React.FC = () => {
   };
 
   const resetPwd = async () => {
+    if (!isDev) {
+      flashToast("Access Denied: Only Developer can modify credentials", "err");
+      return;
+    }
     const pwd = newPwd.trim();
     if (!resetUser || !pwd) return alert("Password cannot be empty");
     if (pwd.length < 4) return alert("Password must be at least 4 characters");
-    if (currentUser?.role === "admin" && resetUser.role !== "staff") {
-      alert("Admins can only reset passwords of Staff accounts.");
-      return;
-    }
-    if (protectedFromMe(resetUser)) {
-      alert("Only the Developer can reset Developer and Super Admin passwords.");
-      return;
-    }
     if (isOverseer(resetUser.role) && currentUser?.id === resetUser.id) {
       alert("You cannot reset your own password through this interface.");
       return;
@@ -282,8 +271,8 @@ const Users: React.FC = () => {
                 Account Plan (Fully Customizable): Super Admin {usedSuper}/{formatPlanCap(planLimits.superadmin)} · Admin {usedAdmin}/{formatPlanCap(planLimits.admin)} · Staff {usedStaff}/{formatPlanCap(planLimits.staff)}
               </div>
             </div>
-            <div className="flex flex-wrap sm:flex-nowrap gap-2 w-full sm:w-auto">
-              {(isAdmin || isDeveloper) && (
+            {isDev && (
+              <div className="flex flex-wrap sm:flex-nowrap gap-2 w-full sm:w-auto">
                 <Button
                   onClick={openNewStaff}
                   className="w-full sm:w-auto"
@@ -292,11 +281,9 @@ const Users: React.FC = () => {
                 >
                   + Add Staff
                 </Button>
-              )}
-              {(isDev || isSuper) && (
                 <Button variant="secondary" onClick={openNewUser} className="w-full sm:w-auto">+ New User</Button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
           {isDeveloper && (
             <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
@@ -341,18 +328,16 @@ const Users: React.FC = () => {
                 <span>· Created {fmtDate(u.createdAt)}</span>
               </div>
               <div className="flex gap-2 flex-wrap border-t border-slate-100 dark:border-slate-800 pt-3">
-                {(isDeveloper || u.role === "staff") && (
-                  <Button size="sm" variant="secondary" onClick={() => openEdit(u)}>✏ Edit</Button>
+                {isDev && (
+                  <>
+                    <Button size="sm" variant="secondary" onClick={() => openEdit(u)}>✏ Edit</Button>
+                    <Button size="sm" variant="secondary" onClick={() => { setResetUser(u); setNewPwd(""); }}>🔑 Password</Button>
+                  </>
                 )}
-                {(isDeveloper || u.role === "staff") && (
-                  <Button size="sm" variant="secondary" onClick={() => { setResetUser(u); setNewPwd(""); }}>🔑 Password</Button>
-                )}
-                {(isDeveloper || u.role === "staff") && (
-                  <Button size="sm" variant={u.active ? "danger" : "success"} onClick={() => toggleActive(u)}>
-                    {u.active ? "🚫 Deactivate" : "✅ Activate"}
-                  </Button>
-                )}
-                {(isDeveloper || u.role === "staff") && (
+                <Button size="sm" variant={u.active ? "danger" : "success"} onClick={() => toggleActive(u)}>
+                  {u.active ? "🚫 Deactivate" : "✅ Activate"}
+                </Button>
+                {isDev && (
                   <Button size="sm" variant="ghost" onClick={() => remove(u)}>🗑 Delete</Button>
                 )}
               </div>
@@ -391,16 +376,18 @@ const Users: React.FC = () => {
                     <td className="px-4 py-3">{u.active ? <Badge tone="green">Active</Badge> : <Badge tone="red">Inactive</Badge>}</td>
                     <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(u.createdAt)}</td>
                     <td className="px-4 py-3 text-right">
-                      {(isDeveloper || u.role === "staff") ? (
-                        <div className="flex gap-1 justify-end">
-                          <Button size="sm" variant="ghost" title="Edit user" onClick={() => openEdit(u)}>✏</Button>
-                          <Button size="sm" variant="ghost" title="Reset password" onClick={() => { setResetUser(u); setNewPwd(""); }}>🔑</Button>
-                          <Button size="sm" variant="ghost" title={u.active ? "Deactivate" : "Activate"} onClick={() => toggleActive(u)}>{u.active ? "🚫" : "✅"}</Button>
+                      <div className="flex gap-1 justify-end items-center">
+                        {isDev && (
+                          <>
+                            <Button size="sm" variant="ghost" title="Edit user" onClick={() => openEdit(u)}>✏</Button>
+                            <Button size="sm" variant="ghost" title="Reset password" onClick={() => { setResetUser(u); setNewPwd(""); }}>🔑</Button>
+                          </>
+                        )}
+                        <Button size="sm" variant="ghost" title={u.active ? "Deactivate" : "Activate"} onClick={() => toggleActive(u)}>{u.active ? "🚫" : "✅"}</Button>
+                        {isDev && (
                           <Button size="sm" variant="ghost" title="Delete user" onClick={() => remove(u)}>🗑</Button>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-slate-400 italic">Developer only</span>
-                      )}
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
