@@ -70,7 +70,7 @@ const Layout: React.FC<{ page: PageId; setPage: (p: PageId) => void; children: R
     if (!flags.grnModule && (n.id === "purchases" || n.id === "grn" || n.id === "approvedGrn")) return false;
     // hide Audit Log when logging is disabled
     if (!flags.auditEnabled && n.id === "audit") return false;
-    if (n.id === "branches" && !multiBranch) return false;
+    if (n.id === "branches" && !multiBranch && currentUser?.role !== "developer") return false;
     if (isOverseer(currentUser?.role)) return true;
     if (currentUser?.role === "admin") {
       if (n.developerOnly) return false;

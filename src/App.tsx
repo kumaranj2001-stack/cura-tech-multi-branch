@@ -52,8 +52,8 @@ const Inner: React.FC = () => {
     setPage("dashboard");
     return null;
   }
-  // Branches tab / multi-branch tools are Full roster (option 4) or Option 5 with super admin
-  if (page === "branches" && !planAllowsMultiBranch(staffPlan, customStaffPlanLimits)) {
+  // Branches tab / multi-branch tools: Developer always has access; Super Admin requires multi-branch plan
+  if (page === "branches" && currentUser.role !== "developer" && !planAllowsMultiBranch(staffPlan, customStaffPlanLimits)) {
     setPage("dashboard");
     return null;
   }

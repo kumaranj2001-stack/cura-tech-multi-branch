@@ -6,6 +6,7 @@ import { validateMedicinePayload, createMedicine, updateMedicine, deleteMedicine
 import { listApprovedGrns, updateApprovedGrn, deleteApprovedGrn, isDeveloperRole } from "./approvedGrnHandler.mjs";
 import { listDoctors, createDoctor, updateDoctor, deleteDoctor } from "./doctorHandler.mjs";
 import { listUsers, createUser, updateUser, deleteUser, validateUserPayload, sanitizeUserOutput } from "./userHandler.mjs";
+import { createBranch, updateBranch, deleteBranch, isBranchCreatorRole } from "./branchHandler.mjs";
 import { db, COLLECTIONS, firebaseConfig } from "./firebase.mjs";
 import { collection, doc, getDoc, getDocs, setDoc, deleteDoc } from "firebase/firestore";
 
@@ -1252,6 +1253,8 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ── BRANCHES ENDPOINTS (Stores to Firestore gp_branches) ──
+  // Branch creation is strictly restricted to Developer role only.
+  // Super Admin, Admin, and Staff are completely blocked from adding branches.
   if (req.method === "GET" && url.pathname === "/api/branches") {
     try {
       const snap = await getDocs(collection(db, COLLECTIONS.branches));
@@ -1269,34 +1272,98 @@ const server = http.createServer(async (req, res) => {
       try {
         if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
         const payload = JSON.parse(body);
+        const role = payload.role || req.headers["x-user-role"] || url.searchParams.get("role") || "";
+
+        // Query existing branches from Firestore to check uniqueness
+        let existingBranches = [];
+        try {
+          const snap = await getDocs(collection(db, COLLECTIONS.branches));
+          existingBranches = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        } catch (dbErr) {
+          console.warn("[Branches query warning]", dbErr.message);
+        }
+
         const b = payload.branch || payload;
-        const name = String(b.name || "").trim();
-        const code = String(b.code || "").trim();
-        if (!name || !code) return sendJson(res, 400, { success: false, error: "Branch name and code are required" });
-        const id = b.id || `br_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-        const cleanBranch = {
-          id,
-          name,
-          code,
-          storeName: b.storeName || "",
-          address: b.address || "",
-          phone: b.phone || "",
-          active: b.active ?? true,
-          createdAt: b.createdAt || new Date().toISOString(),
-        };
+        const result = createBranch(b, existingBranches, role);
 
         const docData = {};
-        for (const [k, v] of Object.entries(cleanBranch)) {
+        for (const [k, v] of Object.entries(result.branch)) {
           if (v !== undefined) docData[k] = v;
         }
 
-        await setDoc(doc(db, COLLECTIONS.branches, id), docData);
-        return sendJson(res, 201, { success: true, branch: cleanBranch });
+        await setDoc(doc(db, COLLECTIONS.branches, result.branch.id), docData);
+        return sendJson(res, 201, result);
       } catch (err) {
-        return sendJson(res, 500, { success: false, error: err.message });
+        return sendJson(res, err.statusCode || 400, { success: false, error: err.message });
       }
     });
     return;
+  }
+
+  if ((req.method === "PUT" || req.method === "PATCH") && url.pathname.startsWith("/api/branches")) {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", async () => {
+      try {
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        const payload = JSON.parse(body);
+        const pathParts = url.pathname.split("/").filter(Boolean);
+        const urlId = pathParts[pathParts.length - 1];
+        const id = payload.id || (urlId !== "branches" && urlId !== "update" ? urlId : null);
+        if (!id) return sendJson(res, 400, { success: false, error: "Branch ID is required" });
+
+        const role = payload.role || req.headers["x-user-role"] || url.searchParams.get("role") || "";
+        let existingBranches = [];
+        try {
+          const snap = await getDocs(collection(db, COLLECTIONS.branches));
+          existingBranches = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        } catch (dbErr) {
+          console.warn("[Branches query warning]", dbErr.message);
+        }
+
+        const result = updateBranch(id, payload.patch || payload, existingBranches, role);
+        const docData = {};
+        for (const [k, v] of Object.entries(result.branch)) {
+          if (v !== undefined) docData[k] = v;
+        }
+        await setDoc(doc(db, COLLECTIONS.branches, id), docData, { merge: true });
+        return sendJson(res, 200, result);
+      } catch (err) {
+        return sendJson(res, err.statusCode || 400, { success: false, error: err.message });
+      }
+    });
+    return;
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/branches")) {
+    const pathParts = url.pathname.split("/").filter(Boolean);
+    const id = pathParts[pathParts.length - 1];
+    const role = req.headers["x-user-role"] || url.searchParams.get("role") || "";
+
+    if (!id || id === "branches") {
+      return sendJson(res, 400, { success: false, error: "Branch ID is required" });
+    }
+
+    try {
+      let existingBranches = [];
+      let existingUsers = [];
+      try {
+        const [bSnap, uSnap] = await Promise.all([
+          getDocs(collection(db, COLLECTIONS.branches)),
+          getDocs(collection(db, COLLECTIONS.users)),
+        ]);
+        existingBranches = bSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        existingUsers = uSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      } catch (dbErr) {
+        console.warn("[Branches query warning]", dbErr.message);
+      }
+
+      const result = deleteBranch(id, existingBranches, existingUsers, role);
+      await deleteDoc(doc(db, COLLECTIONS.branches, id));
+      return sendJson(res, 200, result);
+    } catch (err) {
+      return sendJson(res, err.statusCode || 400, { success: false, error: err.message });
+    }
   }
 
   // ── AUDIT LOG ENDPOINTS (Stores to Firestore gp_audit) ──
