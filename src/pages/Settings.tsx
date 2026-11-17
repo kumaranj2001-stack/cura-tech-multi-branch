@@ -8,7 +8,7 @@ import { isOverseer, STAFF_PLAN_OPTIONS, formatPlanCap, staffPlanLimits, DEFAULT
 import { parseBranchBackup } from "../store/store";
 import { firebaseConfig } from "../config/firebaseConfig";
 import Privacy from "./Privacy";
-import { FileDown, Upload, Package, Filter, BarChart3, LayoutDashboard, QrCode, Loader2, ShieldCheck, CreditCard, AlertTriangle, Clock, Sliders, Trash2, Shield } from "lucide-react";
+import { FileDown, Upload, Package, Filter, BarChart3, LayoutDashboard, QrCode, Loader2, ShieldCheck, CreditCard, AlertTriangle, Clock, Sliders, Trash2, Shield, Building2, Stethoscope } from "lucide-react";
 
 const Toggle: React.FC<{ on: boolean; onChange: (v: boolean) => void; label: string; hint?: string; disabled?: boolean }> = ({ on, onChange, label, hint, disabled }) => (
   <button
@@ -131,6 +131,28 @@ const FLAG_GROUPS: {
     items: [
       { key: "prescriptionUpload", label: "Prescription upload", hint: "Attach prescription images / PDFs to patients" },
       { key: "narcoticPrescriptionRequired", label: "Mandatory prescription for narcotics", hint: "When disabled, waives mandatory prescription requirements for narcotic drugs" },
+    ],
+  },
+  {
+    title: "Doctors Management",
+    icon: Stethoscope,
+    items: [
+      {
+        key: "doctorAddAdminAllowed",
+        label: "Permit Admins to Add Doctors",
+        hint: "When enabled, '+ Add Doctor' is accessible to Super Admins and Admins. When disabled, it is hidden from them and restricted exclusively to Developers.",
+      },
+    ],
+  },
+  {
+    title: "Suppliers & Self-Registration",
+    icon: Building2,
+    items: [
+      {
+        key: "supplierSelfRegistration",
+        label: "Permit Supplier Self-Registration",
+        hint: "When enabled, suppliers are permitted to register or add themselves directly. When disabled, self-registration is turned off, restricting supplier creation solely to Developer control.",
+      },
     ],
   },
   {

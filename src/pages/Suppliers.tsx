@@ -1,14 +1,15 @@
 import React, { useState } from "react";
 import { useStore, uid } from "../store/store";
 import { Pencil, Trash2, Building2, BadgeCheck } from "lucide-react";
-import { Card, CardBody, Input, Label, Button, Th, Td, Modal, EmptyState } from "../components/ui";
+import { Card, CardBody, Input, Textarea, Label, Button, Th, Td, Modal, EmptyState } from "../components/ui";
 import { fmtCurrency } from "../utils/helpers";
 import { sanitizeText } from "../utils/security";
 import type { Supplier } from "../store/types";
 
 const Suppliers: React.FC = () => {
-  const { data, setData, log, currentUser } = useStore();
-  const canManageSuppliers = currentUser?.role === "superadmin" || currentUser?.role === "developer";
+  const { data, setData, log, currentUser, flags } = useStore();
+  const isDev = currentUser?.role === "developer";
+  const canAddSupplier = isDev || Boolean(flags.supplierSelfRegistration);
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<Supplier | null>(null);
   const [form, setForm] = useState({ name: "", contact: "", email: "", address: "", gstNumber: "", diNumber: "" });
@@ -17,14 +18,18 @@ const Suppliers: React.FC = () => {
     data.grns.filter((g) => g.supplierId === id && g.status === "approved").reduce((s, g) => s + g.total, 0);
 
   const openNew = () => {
+    if (!canAddSupplier) {
+      alert("Access restricted: Supplier registration is currently restricted to Developers only.");
+      return;
+    }
     setEdit(null);
     setForm({ name: "", contact: "", email: "", address: "", gstNumber: "", diNumber: "" });
     setOpen(true);
   };
 
   const openEdit = (s: Supplier) => {
-    if (!canManageSuppliers) {
-      alert("Access restricted: Only Super Admin and Developer accounts can edit suppliers.");
+    if (!isDev) {
+      alert("Access restricted: Only Developers can edit suppliers.");
       return;
     }
     setEdit(s);
@@ -40,8 +45,12 @@ const Suppliers: React.FC = () => {
   };
 
   const save = () => {
-    if (edit && !canManageSuppliers) {
-      alert("Access restricted: Only Super Admin and Developer accounts can edit suppliers.");
+    if (edit && !isDev) {
+      alert("Access restricted: Only Developers can edit suppliers.");
+      return;
+    }
+    if (!edit && !canAddSupplier) {
+      alert("Access restricted: Supplier registration is currently restricted to Developers only.");
       return;
     }
     const name = sanitizeText(form.name, 100);
@@ -51,7 +60,7 @@ const Suppliers: React.FC = () => {
       name,
       contact: sanitizeText(form.contact, 30),
       email: sanitizeText(form.email, 100),
-      address: sanitizeText(form.address, 200),
+      address: sanitizeText(form.address, 300),
       gstNumber: sanitizeText(form.gstNumber, 20).toUpperCase(),
       diNumber: sanitizeText(form.diNumber, 40).toUpperCase(),
     };
@@ -67,8 +76,8 @@ const Suppliers: React.FC = () => {
   };
 
   const remove = (s: Supplier) => {
-    if (!canManageSuppliers) {
-      alert("Access restricted: Only Super Admin and Developer accounts can delete suppliers.");
+    if (!isDev) {
+      alert("Access restricted: Only Developers can delete suppliers.");
       return;
     }
     if (!confirm(`Delete ${s.name}?`)) return;
@@ -78,9 +87,21 @@ const Suppliers: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardBody className="flex justify-end"><Button onClick={openNew}>+ New Supplier</Button></CardBody>
-      </Card>
+      {canAddSupplier && (
+        <Card>
+          <CardBody className="flex items-center justify-between gap-3">
+            <div>
+              <div className="font-semibold text-slate-800 dark:text-slate-100 text-sm">Suppliers &amp; Vendors</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                {isDev
+                  ? "Full developer control over vendor profiles and credentials."
+                  : "Supplier direct self-registration is currently active."}
+              </div>
+            </div>
+            <Button onClick={openNew}>+ New Supplier</Button>
+          </CardBody>
+        </Card>
+      )}
 
       {/* Mobile cards */}
       <div className="lg:hidden space-y-3">
@@ -98,28 +119,27 @@ const Suppliers: React.FC = () => {
                     <div className="text-xs text-slate-500">{s.contact}{s.email ? ` · ${s.email}` : ""}</div>
                   </div>
                 </div>
-                <div className="flex gap-1 shrink-0">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={!canManageSuppliers}
-                    onClick={() => canManageSuppliers && openEdit(s)}
-                    title={canManageSuppliers ? "Edit supplier" : "Edit restricted: Super Admin / Developer only"}
-                    className={!canManageSuppliers ? "opacity-40 cursor-not-allowed" : ""}
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={!canManageSuppliers}
-                    onClick={() => canManageSuppliers && remove(s)}
-                    title={canManageSuppliers ? "Delete supplier" : "Delete restricted: Super Admin / Developer only"}
-                    className={!canManageSuppliers ? "opacity-40 cursor-not-allowed" : "text-rose-600 hover:text-rose-700"}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
+                {isDev && (
+                  <div className="flex gap-1 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => openEdit(s)}
+                      title="Edit supplier (Developer only)"
+                    >
+                      <Pencil className="w-4 h-4 text-amber-600" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => remove(s)}
+                      title="Delete supplier (Developer only)"
+                      className="text-rose-600 hover:text-rose-700"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="rounded-lg bg-slate-50 dark:bg-slate-700/40 px-2.5 py-1.5 flex items-center gap-1.5">
@@ -133,7 +153,7 @@ const Suppliers: React.FC = () => {
                   <span className="font-semibold text-slate-700 dark:text-slate-200 truncate">{s.diNumber || "—"}</span>
                 </div>
               </div>
-              {s.address && <div className="text-xs text-slate-500">{s.address}</div>}
+              {s.address && <div className="text-xs text-slate-500 whitespace-pre-line">{s.address}</div>}
               <div className="flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-700 text-sm">
                 <span className="text-slate-500">Total purchases</span>
                 <span className="font-bold text-sky-700">{fmtCurrency(purchaseTotalForSupplier(s.id))}</span>
@@ -149,7 +169,15 @@ const Suppliers: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-slate-50 border-b border-slate-200">
-                <tr><Th>Name</Th><Th>Contact</Th><Th>GST No.</Th><Th>DI No.</Th><Th>Address</Th><Th>Total Purchases</Th><Th></Th></tr>
+                <tr>
+                  <Th>Name</Th>
+                  <Th>Contact</Th>
+                  <Th>GST No.</Th>
+                  <Th>DI No.</Th>
+                  <Th>Address</Th>
+                  <Th>Total Purchases</Th>
+                  {isDev && <Th className="text-right">Actions</Th>}
+                </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {data.suppliers.map((s) => (
@@ -173,30 +201,29 @@ const Suppliers: React.FC = () => {
                         </span>
                       ) : <span className="text-slate-400">—</span>}
                     </Td>
-                    <Td>{s.address || "—"}</Td>
+                    <Td className="whitespace-pre-line max-w-xs">{s.address || "—"}</Td>
                     <Td className="font-semibold">{fmtCurrency(purchaseTotalForSupplier(s.id))}</Td>
-                    <Td className="space-x-1">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={!canManageSuppliers}
-                        onClick={() => canManageSuppliers && openEdit(s)}
-                        title={canManageSuppliers ? "Edit supplier" : "Edit restricted: Super Admin / Developer only"}
-                        className={!canManageSuppliers ? "opacity-40 cursor-not-allowed" : ""}
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={!canManageSuppliers}
-                        onClick={() => canManageSuppliers && remove(s)}
-                        title={canManageSuppliers ? "Delete supplier" : "Delete restricted: Super Admin / Developer only"}
-                        className={!canManageSuppliers ? "opacity-40 cursor-not-allowed" : "text-rose-600 hover:text-rose-700"}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </Td>
+                    {isDev && (
+                      <Td className="text-right space-x-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => openEdit(s)}
+                          title="Edit supplier (Developer only)"
+                        >
+                          <Pencil className="w-4 h-4 text-amber-600" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => remove(s)}
+                          title="Delete supplier (Developer only)"
+                          className="text-rose-600 hover:text-rose-700"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </Td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -225,7 +252,16 @@ const Suppliers: React.FC = () => {
               <p className="text-[11px] text-slate-400 mt-1">Drug license issued to the supplier</p>
             </div>
           </div>
-          <div><Label>Address</Label><Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="Street, city" /></div>
+          <div>
+            <Label>Address</Label>
+            <Textarea
+              rows={3}
+              value={form.address}
+              onChange={(e) => setForm({ ...form, address: e.target.value })}
+              placeholder="Door No, Building, Street&#10;Area, Landmark&#10;City, State - Pincode"
+            />
+            <p className="text-[11px] text-slate-400 mt-1">Multi-line address supported (press Enter for a new line)</p>
+          </div>
           <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-700">
             <Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
             <Button onClick={save}>{edit ? "Update Supplier" : "Save Supplier"}</Button>

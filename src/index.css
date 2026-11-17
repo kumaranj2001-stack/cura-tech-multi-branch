@@ -22,7 +22,7 @@ html.dark body {
 /* Print styles for reports & invoices */
 @media print {
   @page {
-    margin: 12mm;
+    margin: 0;
     size: auto;
   }
   body {
@@ -39,8 +39,9 @@ html.dark body {
     top: 0;
     width: 100%;
     margin: 0;
-    padding: 0;
+    padding: 14mm 12mm;
     background: #ffffff !important;
+    box-sizing: border-box;
   }
   #print-area .shadow,
   #print-area .shadow-sm,

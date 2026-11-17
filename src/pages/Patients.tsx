@@ -110,12 +110,6 @@ const Patients: React.FC = () => {
     setOpen(false);
   };
 
-  const remove = (p: Patient) => {
-    if (!confirm(`Delete patient ${p.name}?`)) return;
-    setData((d) => ({ ...d, patients: d.patients.filter((x) => x.id !== p.id) }));
-    log("PATIENT_DELETE", p.name);
-  };
-
   const history = (pid: string) => data.invoices.filter((i) => i.patientId === pid);
 
   return (
@@ -154,7 +148,6 @@ const Patients: React.FC = () => {
                       <Td className="space-x-2">
                         <Button size="sm" variant="secondary" onClick={() => setView(p)}>History</Button>
                         <Button size="sm" variant="ghost" onClick={() => openEdit(p)}>Edit</Button>
-                        <Button size="sm" variant="ghost" onClick={() => remove(p)}>🗑</Button>
                       </Td>
                     </tr>
                   );

@@ -7,7 +7,9 @@ import type { Doctor } from "../store/types";
 import { Search, Phone, Building2, MapPin, Stethoscope, Pencil, Trash2, Eye, UserPlus, FileText } from "lucide-react";
 
 export const Doctors: React.FC = () => {
-  const { data, setData, log, currentUser, currentBranch } = useStore();
+  const { data, setData, log, currentUser, currentBranch, flags } = useStore();
+  const isDev = currentUser?.role === "developer";
+  const canAddDoctor = isDev || (Boolean(flags.doctorAddAdminAllowed) && (currentUser?.role === "superadmin" || currentUser?.role === "admin"));
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -40,6 +42,10 @@ export const Doctors: React.FC = () => {
   }, [doctorsList, q]);
 
   const openNew = () => {
+    if (!canAddDoctor) {
+      alert("Access restricted: Adding doctors is currently restricted to Developers only.");
+      return;
+    }
     setEdit(null);
     setForm({ name: "", hospital: "", hospitalAddress: "", phone: "", regNo: "" });
     setFormError("");
@@ -47,6 +53,10 @@ export const Doctors: React.FC = () => {
   };
 
   const openEdit = (d: Doctor) => {
+    if (!isDev) {
+      alert("Access restricted: Only Developers can edit doctors.");
+      return;
+    }
     setEdit(d);
     setForm({
       name: d.name,
@@ -60,6 +70,14 @@ export const Doctors: React.FC = () => {
   };
 
   const save = async () => {
+    if (edit && !isDev) {
+      setFormError("Access restricted: Only Developers can edit doctors.");
+      return;
+    }
+    if (!edit && !canAddDoctor) {
+      setFormError("Access restricted: Adding doctors is currently restricted to Developers only.");
+      return;
+    }
     setFormError("");
     const name = sanitizeText(form.name, 100);
     const hospital = sanitizeText(form.hospital, 150);
@@ -157,6 +175,10 @@ export const Doctors: React.FC = () => {
   };
 
   const remove = async (d: Doctor) => {
+    if (!isDev) {
+      alert("Access restricted: Only Developers can delete doctors.");
+      return;
+    }
     if (!confirm(`Are you sure you want to delete ${d.name} (${d.hospital})?`)) return;
     try {
       await fetch(`/api/doctors/${d.id}`, { method: "DELETE" });
@@ -199,9 +221,11 @@ export const Doctors: React.FC = () => {
               className="pl-9 w-full"
             />
           </div>
-          <Button onClick={openNew} className="w-full sm:w-auto shrink-0 shadow-sm">
-            <UserPlus className="w-4 h-4" /> Add Doctor
-          </Button>
+          {canAddDoctor && (
+            <Button onClick={openNew} className="w-full sm:w-auto shrink-0 shadow-sm">
+              <UserPlus className="w-4 h-4" /> Add Doctor
+            </Button>
+          )}
         </CardBody>
       </Card>
 
@@ -265,12 +289,16 @@ export const Doctors: React.FC = () => {
                       <Button size="sm" variant="secondary" onClick={() => setView(d)}>
                         <Eye className="w-3.5 h-3.5" /> View
                       </Button>
-                      <Button size="sm" variant="secondary" onClick={() => openEdit(d)}>
-                        <Pencil className="w-3.5 h-3.5 text-amber-600" /> Edit
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => remove(d)} className="text-rose-600">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
+                      {isDev && (
+                        <>
+                          <Button size="sm" variant="secondary" onClick={() => openEdit(d)}>
+                            <Pencil className="w-3.5 h-3.5 text-amber-600" /> Edit
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => remove(d)} className="text-rose-600">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </CardBody>
                 </Card>
@@ -351,12 +379,16 @@ export const Doctors: React.FC = () => {
                           <Button size="sm" variant="secondary" onClick={() => setView(d)} title="View Doctor Details">
                             <Eye className="w-3.5 h-3.5" /> View
                           </Button>
-                          <Button size="sm" variant="secondary" onClick={() => openEdit(d)} title="Edit Doctor">
-                            <Pencil className="w-3.5 h-3.5 text-amber-600" />
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => remove(d)} title="Delete Doctor" className="text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </Button>
+                          {isDev && (
+                            <>
+                              <Button size="sm" variant="secondary" onClick={() => openEdit(d)} title="Edit Doctor">
+                                <Pencil className="w-3.5 h-3.5 text-amber-600" />
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => remove(d)} title="Delete Doctor" className="text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40">
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </>
+                          )}
                         </div>
                       </Td>
                     </tr>

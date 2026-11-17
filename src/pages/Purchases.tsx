@@ -358,6 +358,34 @@ const Purchases: React.FC = () => {
     ]);
   };
 
+  /* Sequential Enter navigation helper for GRN input fields */
+  const focusGrnField = (fieldId: string) => {
+    requestAnimationFrame(() => {
+      const el = document.getElementById(fieldId);
+      if (el) {
+        el.focus();
+        if (el instanceof HTMLInputElement && el.type !== "date" && el.type !== "button") {
+          try {
+            el.select?.();
+          } catch {
+            // ignore if not selectable
+          }
+        }
+      }
+    });
+  };
+
+  const handleGrnNav = (e: React.KeyboardEvent, nextId: string, prevId?: string) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (e.shiftKey && prevId) {
+        focusGrnField(prevId);
+      } else {
+        focusGrnField(nextId);
+      }
+    }
+  };
+
   /* Pick medicine from inventory combobox */
   const pickProduct = (m: Medicine) => {
     // If supplier is specified on medicine and not yet set on GRN header, auto-select it
@@ -387,6 +415,7 @@ const Purchases: React.FC = () => {
     setComboOpen(false);
     setSelectedIndex(-1);
     flashToast(`✓ Loaded "${m.name}" — Buy: ₹${buyPrice || 0}, MRP: ₹${sellPrice || 0}, GST: ${gstRate}%`, "ok");
+    focusGrnField("grn-rec-qty");
   };
 
   const L = calcLine(line);
@@ -433,6 +462,7 @@ const Purchases: React.FC = () => {
       setLine(blankLine());
       setProductQuery("");
       notify("✓ Line updated in list");
+      focusGrnField("grn-product-name");
       return;
     }
 
@@ -440,6 +470,7 @@ const Purchases: React.FC = () => {
     setLine(blankLine());
     setProductQuery("");
     notify("✓ Line added to list");
+    focusGrnField("grn-product-name");
   };
 
   /* aggregates */
@@ -757,7 +788,13 @@ const Purchases: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <Label>Supplier *</Label>
-              <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+              <Select
+                id="grn-supplier"
+                tabIndex={1}
+                value={supplierId}
+                onChange={(e) => setSupplierId(e.target.value)}
+                onKeyDown={(e) => handleGrnNav(e, "grn-invoice-no")}
+              >
                 <option value="">Select supplier...</option>
                 {data.suppliers.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -769,14 +806,19 @@ const Purchases: React.FC = () => {
             <div>
               <Label>Invoice Number *</Label>
               <Input
+                id="grn-invoice-no"
+                tabIndex={2}
                 value={invoiceNumber}
                 onChange={(e) => setInvoiceNumber(e.target.value)}
+                onKeyDown={(e) => handleGrnNav(e, "grn-receipt-date", "grn-supplier")}
                 placeholder="Supplier invoice no"
               />
             </div>
             <div>
               <Label>Receipt Date</Label>
               <Input
+                id="grn-receipt-date"
+                tabIndex={3}
                 type="date"
                 max={today}
                 value={date}
@@ -788,6 +830,7 @@ const Purchases: React.FC = () => {
                   }
                   setDate(val);
                 }}
+                onKeyDown={(e) => handleGrnNav(e, "grn-product-name", "grn-invoice-no")}
               />
             </div>
           </div>
@@ -819,6 +862,8 @@ const Purchases: React.FC = () => {
             </div>
             <div className="relative">
               <input
+                id="grn-product-name"
+                tabIndex={4}
                 className={inputCls + " pr-9"}
                 value={line.name || productQuery}
                 placeholder="Search inventory by medicine name, batch, or supplier..."
@@ -833,9 +878,17 @@ const Purchases: React.FC = () => {
                   setComboOpen(true);
                 }}
                 onKeyDown={(e) => {
+                  if (e.key === "Enter" && e.shiftKey) {
+                    e.preventDefault();
+                    focusGrnField("grn-receipt-date");
+                    return;
+                  }
                   if (!comboOpen) {
                     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                       setComboOpen(true);
+                    } else if (e.key === "Enter") {
+                      e.preventDefault();
+                      focusGrnField("grn-rec-qty");
                     }
                     return;
                   }
@@ -846,9 +899,12 @@ const Purchases: React.FC = () => {
                     e.preventDefault();
                     setSelectedIndex((prev) => (prev > 0 ? prev - 1 : productMatches.length - 1));
                   } else if (e.key === "Enter") {
+                    e.preventDefault();
                     if (selectedIndex >= 0 && productMatches[selectedIndex]) {
-                      e.preventDefault();
                       pickProduct(productMatches[selectedIndex]);
+                    } else {
+                      setComboOpen(false);
+                      focusGrnField("grn-rec-qty");
                     }
                   } else if (e.key === "Escape") {
                     setComboOpen(false);
@@ -926,6 +982,8 @@ const Purchases: React.FC = () => {
             <div>
               <Label>Receiving Quantity (Strips) *</Label>
               <input
+                id="grn-rec-qty"
+                tabIndex={5}
                 type="number"
                 min={0.01}
                 step={0.01}
@@ -934,12 +992,15 @@ const Purchases: React.FC = () => {
                 onChange={(e) =>
                   setLine({ ...line, receivingQty: e.target.value === "" ? "" : Number(e.target.value) })
                 }
+                onKeyDown={(e) => handleGrnNav(e, "grn-uom", "grn-product-name")}
                 placeholder="Enter strips"
               />
             </div>
             <div>
               <Label>UOM Qty per Strip (Enter tabs/strip) *</Label>
               <input
+                id="grn-uom"
+                tabIndex={6}
                 type="number"
                 min={1}
                 step={1}
@@ -948,12 +1009,15 @@ const Purchases: React.FC = () => {
                 onChange={(e) =>
                   setLine({ ...line, uomPerStrip: e.target.value === "" ? "" : Number(e.target.value) })
                 }
+                onKeyDown={(e) => handleGrnNav(e, "grn-free-qty", "grn-rec-qty")}
                 placeholder="Enter tabs/strip"
               />
             </div>
             <div>
               <Label>Free to Society (Strips)</Label>
               <input
+                id="grn-free-qty"
+                tabIndex={7}
                 type="number"
                 min={0}
                 step={1}
@@ -962,12 +1026,15 @@ const Purchases: React.FC = () => {
                 onChange={(e) =>
                   setLine({ ...line, freeQty: e.target.value === "" ? "" : Number(e.target.value) })
                 }
+                onKeyDown={(e) => handleGrnNav(e, "grn-buy-price", "grn-uom")}
                 placeholder="Free strips"
               />
             </div>
             <div>
               <Label>Purchase Price per unit *</Label>
               <input
+                id="grn-buy-price"
+                tabIndex={8}
                 type="number"
                 min={0}
                 step={0.001}
@@ -976,12 +1043,15 @@ const Purchases: React.FC = () => {
                 onChange={(e) =>
                   setLine({ ...line, purchasePrice: e.target.value === "" ? "" : Number(e.target.value) })
                 }
+                onKeyDown={(e) => handleGrnNav(e, "grn-disc-pct", "grn-free-qty")}
                 placeholder="Enter buy price"
               />
             </div>
             <div>
               <Label>Discount %</Label>
               <input
+                id="grn-disc-pct"
+                tabIndex={9}
                 type="number"
                 min={0}
                 max={100}
@@ -991,15 +1061,19 @@ const Purchases: React.FC = () => {
                 onChange={(e) =>
                   setLine({ ...line, discPct: e.target.value === "" ? "" : Number(e.target.value) })
                 }
+                onKeyDown={(e) => handleGrnNav(e, "grn-tax-pct", "grn-buy-price")}
                 placeholder="Enter disc %"
               />
             </div>
             <div>
               <Label>Tax (%) *</Label>
               <select
+                id="grn-tax-pct"
+                tabIndex={10}
                 className={inputCls}
                 value={line.taxPct}
                 onChange={(e) => setLine({ ...line, taxPct: Number(e.target.value) })}
+                onKeyDown={(e) => handleGrnNav(e, "grn-mrp-unit", "grn-disc-pct")}
               >
                 {TAX_OPTIONS.map((t) => (
                   <option key={t} value={t}>
@@ -1011,6 +1085,8 @@ const Purchases: React.FC = () => {
             <div>
               <Label>MRP Price per unit *</Label>
               <input
+                id="grn-mrp-unit"
+                tabIndex={11}
                 type="number"
                 min={0}
                 step={0.01}
@@ -1019,6 +1095,7 @@ const Purchases: React.FC = () => {
                 onChange={(e) =>
                   setLine({ ...line, mrpUnit: e.target.value === "" ? "" : Number(e.target.value) })
                 }
+                onKeyDown={(e) => handleGrnNav(e, "grn-batch", "grn-tax-pct")}
                 placeholder="Enter MRP/unit"
               />
             </div>
@@ -1026,6 +1103,7 @@ const Purchases: React.FC = () => {
               <Label>Total Units Received</Label>
               <input
                 readOnly
+                tabIndex={-1}
                 className={roCls}
                 value={n2(L.totalUnitsReceived)}
                 title={`Total received: ${n2(L.totalUnitsReceived)} units`}
@@ -1035,6 +1113,7 @@ const Purchases: React.FC = () => {
               <Label>Shelf Life (Days)</Label>
               <input
                 readOnly
+                tabIndex={-1}
                 className={roCls + (L.shelfLifeDays !== null && L.shelfLifeDays < 180 ? " !text-amber-600" : "")}
                 value={L.shelfLifeDays === null ? "—" : String(L.shelfLifeDays)}
               />
@@ -1042,14 +1121,19 @@ const Purchases: React.FC = () => {
             <div>
               <Label>Batch Number *</Label>
               <Input
+                id="grn-batch"
+                tabIndex={12}
                 value={line.batch}
                 onChange={(e) => setLine({ ...line, batch: e.target.value })}
+                onKeyDown={(e) => handleGrnNav(e, "grn-mfg-date", "grn-mrp-unit")}
                 placeholder="e.g. B1001"
               />
             </div>
             <div>
               <Label>Manufacture Date</Label>
               <Input
+                id="grn-mfg-date"
+                tabIndex={13}
                 type="date"
                 max={today}
                 value={line.mfgDate}
@@ -1061,14 +1145,18 @@ const Purchases: React.FC = () => {
                   }
                   setLine({ ...line, mfgDate: val });
                 }}
+                onKeyDown={(e) => handleGrnNav(e, "grn-expiry", "grn-batch")}
               />
             </div>
             <div>
               <Label>Expiry Date *</Label>
               <Input
+                id="grn-expiry"
+                tabIndex={14}
                 type="date"
                 value={line.expiry}
                 onChange={(e) => setLine({ ...line, expiry: e.target.value })}
+                onKeyDown={(e) => handleGrnNav(e, "grn-add-btn", "grn-mfg-date")}
               />
             </div>
           </div>
@@ -1086,7 +1174,18 @@ const Purchases: React.FC = () => {
                 Cancel Edit
               </Button>
             )}
-            <Button onClick={addTogether} className="shadow-md">
+            <Button
+              id="grn-add-btn"
+              tabIndex={15}
+              onClick={addTogether}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && e.shiftKey) {
+                  e.preventDefault();
+                  focusGrnField("grn-expiry");
+                }
+              }}
+              className="shadow-md focus:ring-2 focus:ring-offset-2 focus:ring-sky-500"
+            >
               {editingLineId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
               {editingLineId ? "Update Line" : "Add To List"}
             </Button>
@@ -1212,6 +1311,7 @@ const Purchases: React.FC = () => {
                               setEditingLineId(l.id);
                               setProductQuery(l.name);
                               document.getElementById("grn-line-editor")?.scrollIntoView({ behavior: "smooth" });
+                              focusGrnField("grn-rec-qty");
                             }}
                             className="w-6 h-6 rounded-md bg-sky-100 dark:bg-sky-900/40 text-sky-600 dark:text-sky-300 hover:bg-sky-200 flex items-center justify-center transition"
                             title="Edit line in editor"

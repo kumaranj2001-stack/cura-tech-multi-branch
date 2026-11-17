@@ -311,6 +311,8 @@ export interface FeatureFlags {
   repUserSalesPdf: boolean;
   narcoticPrescriptionRequired: boolean;
   minStockFeature: boolean;
+  supplierSelfRegistration?: boolean;
+  doctorAddAdminAllowed?: boolean;
 }
 
 /* ── Developer-controlled staff / account plans (mutually exclusive) ──── */
@@ -448,6 +450,8 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   repUserSalesPdf: true,
   narcoticPrescriptionRequired: true,
   minStockFeature: true,
+  supplierSelfRegistration: false,
+  doctorAddAdminAllowed: false,
 };
 
 export const getAuditRetentionDays = (flags: FeatureFlags): number | null => {
