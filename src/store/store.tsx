@@ -1007,6 +1007,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [applyUpdate]);
 
   const clearAuditLog = useCallback(async () => {
+    if (currentUserRef.current?.role !== "developer") {
+      flashToast("Access Denied: Only Developer can clear audit logs", "err");
+      return;
+    }
     const now = new Date().toISOString();
     applyUpdate((prev) => ({ ...prev, audit: [] }));
     if (db) {
@@ -1015,6 +1019,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } catch (err) {
         console.warn("[clearAuditLog error]", err);
       }
+    }
+    try {
+      await fetch("/api/audit/clear", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-role": currentUserRef.current?.role || "",
+        },
+      });
+    } catch (err) {
+      console.warn("[clearAuditLog backend error]", err);
     }
     flashToast("Audit log cleared", "ok");
   }, [applyUpdate]);
@@ -1084,10 +1099,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
 
     try {
+      const activeLimits = staffPlanLimits(staffPlanRef.current, customStaffPlanLimitsRef.current);
       await fetch("/api/users", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newUser),
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-role": currentUserRef.current?.role || "",
+        },
+        body: JSON.stringify({
+          user: newUser,
+          callerRole: currentUserRef.current?.role || "",
+          planLimits: activeLimits,
+        }),
       });
     } catch (err) {
       console.warn("[createUser backend error]", err);

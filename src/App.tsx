@@ -52,6 +52,11 @@ const Inner: React.FC = () => {
     setPage("dashboard");
     return null;
   }
+  // Standalone Privacy page is strictly for Developer (Super Admin, Admin, and Staff access it inside Settings)
+  if (page === "privacy" && currentUser.role !== "developer") {
+    setPage("settings");
+    return null;
+  }
   // Branches tab / multi-branch tools: Developer always has access; Super Admin requires multi-branch plan
   if (page === "branches" && currentUser.role !== "developer" && !planAllowsMultiBranch(staffPlan, customStaffPlanLimits)) {
     setPage("dashboard");

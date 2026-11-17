@@ -8,6 +8,7 @@ const Audit: React.FC = () => {
   const { data, flags, currentUser, clearAuditLog } = useStore();
   const [q, setQ] = useState("");
   const isOverseerRole = currentUser?.role === "superadmin" || currentUser?.role === "developer";
+  const isDev = currentUser?.role === "developer";
 
   const branchOf = (id?: string) => data.branches.find((b) => b.id === id)?.code || (id ? "—" : "HQ");
 
@@ -53,7 +54,7 @@ const Audit: React.FC = () => {
           <div className="flex-1 flex flex-wrap gap-2 sm:gap-3">
             <Input placeholder="Search user/action..." value={q} onChange={(e) => setQ(e.target.value)} />
             <Button variant="secondary" onClick={exportPdf}><FileDown className="w-4 h-4" /> Download PDF</Button>
-            {isOverseerRole && (
+            {isDev && (
               <Button
                 variant="danger"
                 onClick={() => {

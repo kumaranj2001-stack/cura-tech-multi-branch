@@ -72,7 +72,7 @@ export function listUsers(users = [], options = {}, callerRole = "") {
   });
 }
 
-export function createUser(payload = {}, existingUsers = []) {
+export function createUser(payload = {}, existingUsers = [], callerRole = "", planLimits = null) {
   const validation = validateUserPayload(payload, false);
   if (!validation.valid) {
     const err = new Error(validation.errors.join("; "));
@@ -81,6 +81,31 @@ export function createUser(payload = {}, existingUsers = []) {
   }
 
   const { username, name, password, role, branchId, active } = validation.cleaned;
+  const isDevCaller = String(callerRole || "").trim().toLowerCase() === "developer";
+
+  // Admins and Super Admins are strictly restricted to adding Staff accounts
+  if (!isDevCaller && role !== "staff") {
+    const err = new Error("Access Denied: Admins and Super Admins can only add Staff members. Only Developer can add Admin, Super Admin, and Developer accounts.");
+    err.statusCode = 403;
+    throw err;
+  }
+
+  // Quota enforcement based on plan assigned to Developer
+  if (planLimits && typeof planLimits === "object") {
+    const maxQuota = role === "staff" ? planLimits.staff
+      : role === "admin" ? planLimits.admin
+      : role === "superadmin" ? planLimits.superadmin
+      : Infinity;
+
+    if (Number.isFinite(maxQuota)) {
+      const used = (existingUsers || []).filter((u) => u && u.role === role).length;
+      if (used >= maxQuota) {
+        const err = new Error(`Quota limit reached: The current plan permits a maximum of ${maxQuota} ${role} account(s).`);
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+  }
 
   // Check username uniqueness
   const duplicate = existingUsers.find((u) => u && String(u.username).toLowerCase() === username);

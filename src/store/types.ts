@@ -214,6 +214,7 @@ export interface GRN {
   aiExtracted?: boolean;
   modelUsed?: string;
   extractedAt?: string;
+  createdAt?: string;
 }
 
 export interface ReturnEntry {

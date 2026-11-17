@@ -570,6 +570,7 @@ const Purchases: React.FC = () => {
       aiExtracted: isAiExtracted,
       modelUsed: aiModelUsed || undefined,
       extractedAt: isAiExtracted ? new Date().toISOString() : undefined,
+      createdAt: new Date().toISOString(),
     };
 
     setData((d) => ({ ...d, grns: [grn, ...d.grns], counters: { ...d.counters, grn: newCounter } }));

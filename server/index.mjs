@@ -917,6 +917,8 @@ const server = http.createServer(async (req, res) => {
         if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
         const payload = JSON.parse(body);
         let existingUsers = payload.users || [];
+        const callerRole = payload.callerRole || req.headers["x-user-role"] || url.searchParams.get("role") || "";
+        const planLimits = payload.planLimits || null;
         if (!existingUsers || existingUsers.length === 0) {
           try {
             const snap = await getDocs(collection(db, COLLECTIONS.users));
@@ -924,7 +926,7 @@ const server = http.createServer(async (req, res) => {
           } catch {}
         }
 
-        const result = createUser(payload.user || payload, existingUsers);
+        const result = createUser(payload.user || payload, existingUsers, callerRole, planLimits);
 
         // Store to Firestore gp_users
         try {
@@ -1411,6 +1413,26 @@ const server = http.createServer(async (req, res) => {
       }
     });
     return;
+  }
+
+  // Clear Audit Log (Developer only)
+  if ((req.method === "DELETE" && url.pathname === "/api/audit") || (req.method === "POST" && url.pathname === "/api/audit/clear")) {
+    const callerRole = req.headers["x-user-role"] || url.searchParams.get("role") || "";
+    if (String(callerRole).trim().toLowerCase() !== "developer") {
+      return sendJson(res, 403, { success: false, error: "Access Denied: Only Developer can clear audit logs." });
+    }
+
+    try {
+      const snap = await getDocs(collection(db, COLLECTIONS.audit));
+      const batch = writeBatch(db);
+      snap.docs.forEach((d) => batch.delete(d.ref));
+      const now = new Date().toISOString();
+      batch.set(doc(db, COLLECTIONS.meta, "app"), { auditClearedAt: now, updatedAt: now }, { merge: true });
+      await batch.commit();
+      return sendJson(res, 200, { success: true, message: "Audit log cleared successfully" });
+    } catch (err) {
+      return sendJson(res, 500, { success: false, error: err.message });
+    }
   }
 
   // Not found

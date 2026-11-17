@@ -53,7 +53,7 @@ const NAV: NavItem[] = [
   { id: "users", label: "Users", icon: "🔐", adminOnly: true },
   { id: "branches", label: "Branches", icon: "🏪", developerOnly: true },
   { id: "settings", label: "Settings", icon: "⚙️", staffAllowed: true },
-  { id: "privacy", label: "Privacy Policy", icon: "🛡️", staffAllowed: true },
+  { id: "privacy", label: "Privacy Policy", icon: "🛡️", developerOnly: true },
 ];
 
 const Layout: React.FC<{ page: PageId; setPage: (p: PageId) => void; children: React.ReactNode }> = ({ page, setPage, children }) => {
@@ -71,8 +71,13 @@ const Layout: React.FC<{ page: PageId; setPage: (p: PageId) => void; children: R
     // hide Audit Log when logging is disabled
     if (!flags.auditEnabled && n.id === "audit") return false;
     if (n.id === "branches" && !multiBranch && currentUser?.role !== "developer") return false;
-    if (n.id === "privacy" && currentUser?.role === "developer") return false;
-    if (isOverseer(currentUser?.role)) return true;
+    // Privacy policy option in menu is accessible purely to Developer (non-developers see it embedded in Settings)
+    if (n.id === "privacy" && currentUser?.role !== "developer") return false;
+    if (currentUser?.role === "developer") return true;
+    if (isOverseer(currentUser?.role)) {
+      if (n.developerOnly) return false;
+      return true;
+    }
     if (currentUser?.role === "admin") {
       if (n.developerOnly) return false;
       return true;

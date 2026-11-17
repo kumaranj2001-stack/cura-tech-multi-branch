@@ -2,7 +2,8 @@ import React, { useMemo, useState } from "react";
 import { useStore } from "../store/store";
 import { Card, CardBody, Button, Th, Td, Select, Input, Badge } from "../components/ui";
 import { FileDown } from "lucide-react";
-import { fmtCurrency, fmtDate, downloadPDF, isExpired, daysToExpiry } from "../utils/helpers";
+import { fmtCurrency, fmtDate, fmtDateTime, fmtTime, downloadPDF, isExpired, daysToExpiry } from "../utils/helpers";
+import logoUrl from "../assets/logo.png";
 
 type ReportType = "daily" | "monthly" | "purchases" | "stock" | "expiry" | "pl" | "tax" | "user" | "userSales";
 
@@ -55,29 +56,41 @@ const Reports: React.FC = () => {
 
   const result = useMemo(() => {
     if (type === "daily") {
-      const map: Record<string, { count: number; total: number; tax: number }> = {};
-      data.invoices.filter((i) => inRange(i.date)).forEach((i) => {
-        const d = i.date.slice(0, 10);
-        if (!map[d]) map[d] = { count: 0, total: 0, tax: 0 };
-        map[d].count++;
-        map[d].total += i.total;
-        map[d].tax += i.taxAmount;
-      });
-      return Object.entries(map).sort((a, b) => b[0].localeCompare(a[0])).map(([date, v]) => ({ date, ...v }));
+      const filteredInvoices = data.invoices.filter((i) => inRange(i.date));
+      return filteredInvoices
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        .map((inv) => ({
+          id: inv.id,
+          date: inv.date.slice(0, 10),
+          time: fmtTime(inv.date),
+          timestamp: inv.date,
+          invoiceNumber: inv.number,
+          tax: inv.taxAmount,
+          total: inv.total,
+        }));
     }
     if (type === "monthly") {
-      const map: Record<string, { count: number; total: number; tax: number }> = {};
-      data.invoices.filter((i) => inRange(i.date)).forEach((i) => {
-        const d = i.date.slice(0, 7);
-        if (!map[d]) map[d] = { count: 0, total: 0, tax: 0 };
-        map[d].count++;
-        map[d].total += i.total;
-        map[d].tax += i.taxAmount;
-      });
-      return Object.entries(map).sort((a, b) => b[0].localeCompare(a[0])).map(([date, v]) => ({ date, ...v }));
+      const filteredInvoices = data.invoices.filter((i) => inRange(i.date));
+      return filteredInvoices
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        .map((inv) => ({
+          id: inv.id,
+          date: inv.date.slice(0, 7),
+          time: fmtTime(inv.date),
+          timestamp: inv.date,
+          invoiceNumber: inv.number,
+          tax: inv.taxAmount,
+          total: inv.total,
+        }));
     }
     if (type === "purchases") {
-      return data.grns.filter((g) => g.status === "approved" && inRange(g.date));
+      return data.grns
+        .filter((g) => g.status === "approved" && inRange(g.date))
+        .sort((a, b) => new Date(b.approvedAt || b.createdAt || b.date).getTime() - new Date(a.approvedAt || a.createdAt || a.date).getTime())
+        .map((g) => ({
+          ...g,
+          time: fmtTime(g.approvedAt || g.createdAt || g.date),
+        }));
     }
     if (type === "stock") {
       return data.medicines;
@@ -180,11 +193,23 @@ const Reports: React.FC = () => {
     if (!canDownloadPdf) return;
     let rows: (string | number)[][] = [];
     if (type === "daily" || type === "monthly") {
-      rows = [["Period", "Invoices", "Tax", "Total"]];
-      (result as { date: string; count: number; tax: number; total: number }[]).forEach((r) => rows.push([r.date, r.count, r.tax.toFixed(2), r.total.toFixed(2)]));
+      rows = [["Period", "Time", "Invoices", "Tax", "Total"]];
+      (result as { date: string; time: string; invoiceNumber: string; tax: number; total: number }[]).forEach((r) =>
+        rows.push([r.date, r.time, r.invoiceNumber, r.tax.toFixed(2), r.total.toFixed(2)])
+      );
     } else if (type === "purchases") {
-      rows = [["GRN", "Date", "Supplier", "Items", "Total"]];
-      (result as { number: string; date: string; supplierName: string; items: unknown[]; total: number }[]).forEach((g) => rows.push([g.number, g.date, g.supplierName, g.items.length, g.total.toFixed(2)]));
+      rows = [["GRN", "Date", "Time", "Supplier", "Invoices", "Items", "Total"]];
+      (result as { number: string; date: string; time: string; invoiceNumber?: string; supplierName: string; items: unknown[]; total: number }[]).forEach((g) =>
+        rows.push([
+          g.number,
+          fmtDate(g.date),
+          g.time,
+          g.supplierName,
+          g.invoiceNumber || g.number,
+          g.items.length,
+          g.total.toFixed(2),
+        ])
+      );
     } else if (type === "stock" || type === "expiry") {
       rows = [["Name", "Batch", "Stock", "Buy", "Sell", "Expiry"]];
       (result as { name: string; batch: string; stock: number; purchasePrice: number; sellingPrice: number; expiry: string }[]).forEach((m) => rows.push([m.name, m.batch, m.stock, m.purchasePrice, m.sellingPrice, m.expiry]));
@@ -250,43 +275,133 @@ const Reports: React.FC = () => {
       </Card>
 
       <div id="print-area">
-        <Card>
-          <CardBody>
-            <div className="flex flex-wrap items-center gap-2 mb-1">
-              <h2 className="text-xl font-bold">Guru — Report</h2>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/30 px-2.5 py-1 text-xs font-semibold text-teal-700 dark:text-teal-300">
-                <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
-                {scopeLabel}
-              </span>
+        <Card className="print:border-0 print:shadow-none print:p-0">
+          <CardBody className="print:p-0">
+            {/* Branded print header matching PDF format */}
+            <div className="hidden print:block mb-5 overflow-hidden rounded-t-lg">
+              <div className="bg-[#0284c7] text-white p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-white flex items-center justify-center p-1.5 shrink-0 shadow-sm">
+                    <img src={logoUrl} alt="Guru" className="w-9 h-9 object-contain" />
+                  </div>
+                  <div>
+                    <div className="text-xl font-bold tracking-tight leading-tight">GURU</div>
+                    <div className="text-[11px] text-sky-100 font-medium">Pharmacy Management System</div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm font-bold tracking-wide uppercase">{type.replace(/-/g, " ")} Report</div>
+                  <div className="text-[11px] text-sky-100">{new Date().toLocaleString("en-IN")}</div>
+                </div>
+              </div>
+              <div className="h-1 bg-[#10b981]" />
+              <div className="bg-slate-50 border-x border-b border-slate-200 px-4 py-2 flex items-center justify-between text-xs text-slate-600">
+                <span><b>Scope:</b> {scopeLabel}</span>
+                <span>{(from || to) ? `Range: ${from || "Beginning"} to ${to || "Today"}` : "All Recorded Periods"}</span>
+              </div>
             </div>
-            <p className="text-sm text-slate-500 mb-4 capitalize">{type.replace(/-/g, " ")} report {from && `from ${from}`} {to && `to ${to}`}{isOverseerRole && !viewBranchId ? " · combined across every branch" : ""}</p>
+
+            {/* Standard screen view header */}
+            <div className="print:hidden">
+              <div className="flex flex-wrap items-center gap-2 mb-1">
+                <h2 className="text-xl font-bold">Guru — Report</h2>
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/30 px-2.5 py-1 text-xs font-semibold text-teal-700 dark:text-teal-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
+                  {scopeLabel}
+                </span>
+              </div>
+              <p className="text-sm text-slate-500 mb-4 capitalize">{type.replace(/-/g, " ")} report {from && `from ${from}`} {to && `to ${to}`}{isOverseerRole && !viewBranchId ? " · combined across every branch" : ""}</p>
+            </div>
 
             {(type === "daily" || type === "monthly") && (
-              <table className="w-full">
-                <thead className="bg-slate-50 border-b border-slate-200"><tr><Th>Period</Th><Th>Invoices</Th><Th>Tax</Th><Th>Total</Th></tr></thead>
-                <tbody className="divide-y divide-slate-100">
-                  {(result as { date: string; count: number; tax: number; total: number }[]).map((r) => (
-                    <tr key={r.date}><Td>{r.date}</Td><Td>{r.count}</Td><Td>{fmtCurrency(r.tax)}</Td><Td className="font-semibold">{fmtCurrency(r.total)}</Td></tr>
-                  ))}
-                  {result.length === 0 && (
-                    <tr><td colSpan={4} className="text-center py-8 text-slate-400">No sales records found</td></tr>
+              <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700 print:border-slate-300">
+                <table className="w-full text-left">
+                  <thead className="bg-[#0ea5e9] text-white print:bg-[#0ea5e9] print:text-white border-b border-sky-600">
+                    <tr>
+                      <th className="px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider text-white">Period</th>
+                      <th className="px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider text-white">Time</th>
+                      <th className="px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider text-white">Invoices</th>
+                      <th className="px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider text-white">Tax</th>
+                      <th className="px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider text-white">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60 print:divide-slate-200 text-sm">
+                    {(result as { id: string; date: string; time: string; invoiceNumber: string; tax: number; total: number }[]).map((r, idx) => (
+                      <tr key={r.id || `${r.date}-${idx}`} className={idx % 2 === 1 ? "bg-slate-50/70 dark:bg-slate-800/40 print:bg-slate-50" : "bg-white dark:bg-slate-800 print:bg-white"}>
+                        <Td className="whitespace-nowrap font-semibold text-slate-800 dark:text-slate-100">{r.date}</Td>
+                        <Td className="whitespace-nowrap font-mono text-xs text-slate-500 dark:text-slate-400">{r.time}</Td>
+                        <Td className="font-mono text-sky-700 dark:text-sky-300 font-semibold">{r.invoiceNumber}</Td>
+                        <Td className="tabular-nums">{fmtCurrency(r.tax)}</Td>
+                        <Td className="font-bold tabular-nums text-slate-800 dark:text-slate-100">{fmtCurrency(r.total)}</Td>
+                      </tr>
+                    ))}
+                    {result.length === 0 && (
+                      <tr><td colSpan={5} className="text-center py-8 text-slate-400">No sales records found</td></tr>
+                    )}
+                  </tbody>
+                  {result.length > 0 && (
+                    <tfoot className="border-t-2 border-slate-300 dark:border-slate-600 bg-slate-100/80 dark:bg-slate-800 font-bold text-sm">
+                      <tr>
+                        <Td colSpan={2}>Total ({result.length} Records)</Td>
+                        <Td className="font-mono">—</Td>
+                        <Td className="tabular-nums">
+                          {fmtCurrency((result as { tax: number }[]).reduce((sum, r) => sum + r.tax, 0))}
+                        </Td>
+                        <Td className="tabular-nums text-emerald-700 dark:text-emerald-400 font-extrabold">
+                          {fmtCurrency((result as { total: number }[]).reduce((sum, r) => sum + r.total, 0))}
+                        </Td>
+                      </tr>
+                    </tfoot>
                   )}
-                </tbody>
-              </table>
+                </table>
+              </div>
             )}
 
             {type === "purchases" && (
-              <table className="w-full">
-                <thead className="bg-slate-50 border-b border-slate-200"><tr><Th>GRN</Th><Th>Date</Th><Th>Supplier</Th><Th>Items</Th><Th>Total</Th></tr></thead>
-                <tbody className="divide-y divide-slate-100">
-                  {(result as { id: string; number: string; date: string; supplierName: string; items: unknown[]; total: number }[]).map((g) => (
-                    <tr key={g.id}><Td>{g.number}</Td><Td>{fmtDate(g.date)}</Td><Td>{g.supplierName}</Td><Td>{g.items.length}</Td><Td className="font-semibold">{fmtCurrency(g.total)}</Td></tr>
-                  ))}
-                  {result.length === 0 && (
-                    <tr><td colSpan={5} className="text-center py-8 text-slate-400">No purchase records found</td></tr>
+              <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700 print:border-slate-300">
+                <table className="w-full text-left">
+                  <thead className="bg-[#0ea5e9] text-white print:bg-[#0ea5e9] print:text-white border-b border-sky-600">
+                    <tr>
+                      <th className="px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider text-white">GRN</th>
+                      <th className="px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider text-white">Date</th>
+                      <th className="px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider text-white">Time</th>
+                      <th className="px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider text-white">Supplier</th>
+                      <th className="px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider text-white">Invoices</th>
+                      <th className="px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider text-white">Items</th>
+                      <th className="px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider text-white">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60 print:divide-slate-200 text-sm">
+                    {(result as { id: string; number: string; date: string; time: string; invoiceNumber?: string; supplierName: string; items: unknown[]; total: number }[]).map((g, idx) => (
+                      <tr key={g.id} className={idx % 2 === 1 ? "bg-slate-50/70 dark:bg-slate-800/40 print:bg-slate-50" : "bg-white dark:bg-slate-800 print:bg-white"}>
+                        <Td className="font-mono font-semibold text-sky-700 dark:text-sky-300">{g.number}</Td>
+                        <Td className="whitespace-nowrap font-semibold text-slate-800 dark:text-slate-100">{fmtDate(g.date)}</Td>
+                        <Td className="whitespace-nowrap font-mono text-xs text-slate-500 dark:text-slate-400">{g.time}</Td>
+                        <Td className="font-medium">{g.supplierName}</Td>
+                        <Td className="font-mono text-slate-700 dark:text-slate-300 font-semibold">{g.invoiceNumber || g.number}</Td>
+                        <Td className="tabular-nums">{g.items.length}</Td>
+                        <Td className="font-bold tabular-nums text-slate-800 dark:text-slate-100">{fmtCurrency(g.total)}</Td>
+                      </tr>
+                    ))}
+                    {result.length === 0 && (
+                      <tr><td colSpan={7} className="text-center py-8 text-slate-400">No purchase records found</td></tr>
+                    )}
+                  </tbody>
+                  {result.length > 0 && (
+                    <tfoot className="border-t-2 border-slate-300 dark:border-slate-600 bg-slate-100/80 dark:bg-slate-800 font-bold text-sm">
+                      <tr>
+                        <Td colSpan={5}>Total ({result.length} Purchases)</Td>
+                        <Td className="tabular-nums">
+                          {(result as { items: unknown[] }[]).reduce((sum, g) => sum + g.items.length, 0)}
+                        </Td>
+                        <Td className="tabular-nums text-emerald-700 dark:text-emerald-400 font-extrabold">
+                          {fmtCurrency((result as { total: number }[]).reduce((sum, g) => sum + g.total, 0))}
+                        </Td>
+                      </tr>
+                    </tfoot>
                   )}
-                </tbody>
-              </table>
+                </table>
+              </div>
             )}
 
             {(type === "stock" || type === "expiry") && (

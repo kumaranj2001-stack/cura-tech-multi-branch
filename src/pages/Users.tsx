@@ -63,6 +63,11 @@ const Users: React.FC = () => {
   }
 
   const openForm = (role: UserRole) => {
+    // Non-developer roles (Admin and Super Admin) are strictly restricted to adding Staff
+    if (!isDev && role !== "staff") {
+      alert("Access Denied: Admins and Super Admins can only add Staff members. Only Developer can add Admin, Super Admin, and Developer accounts.");
+      return;
+    }
     const check = canCreateAccount(data.users, role, staffPlan, undefined, customStaffPlanLimits);
     if (!check.ok) {
       alert(check.message);
@@ -83,6 +88,10 @@ const Users: React.FC = () => {
   const openNewStaff = () => openForm("staff");
 
   const openNewUser = () => {
+    if (!isDev) {
+      openForm("staff");
+      return;
+    }
     const order: UserRole[] = ["staff", "admin", "superadmin"];
     const role = order.find((r) => canCreateAccount(data.users, r, staffPlan, undefined, customStaffPlanLimits).ok) || "staff";
     openForm(role);
@@ -154,8 +163,8 @@ const Users: React.FC = () => {
         log("USER_UPDATE", `${trimmedUsername} (${branchName(targetBranchId)})`);
         flashToast("User updated successfully", "ok");
       } else {
-        if (currentUser?.role === "admin" && cleanForm.role !== "staff") {
-          return alert("Admins can only add Staff accounts.");
+        if (!isDev && cleanForm.role !== "staff") {
+          return alert("Access Denied: Admins and Super Admins can only add Staff accounts. Only Developer can add Admin and Super Admin accounts.");
         }
         const quota = canCreateAccount(data.users, cleanForm.role, staffPlan, undefined, customStaffPlanLimits);
         if (!quota.ok) return alert(quota.message);
@@ -271,19 +280,20 @@ const Users: React.FC = () => {
                 Account Plan (Fully Customizable): Super Admin {usedSuper}/{formatPlanCap(planLimits.superadmin)} · Admin {usedAdmin}/{formatPlanCap(planLimits.admin)} · Staff {usedStaff}/{formatPlanCap(planLimits.staff)}
               </div>
             </div>
-            {isDev && (
-              <div className="flex flex-wrap sm:flex-nowrap gap-2 w-full sm:w-auto">
-                <Button
-                  onClick={openNewStaff}
-                  className="w-full sm:w-auto"
-                  disabled={!canAddStaff}
-                  title={canAddStaff ? "Add a staff account within the active plan" : staffCreateCheck.message}
-                >
-                  + Add Staff
-                </Button>
+            {/* Action buttons: Developer can add Staff, Admin, Super Admin (+ New User). Admin and Super Admin can strictly add Staff */}
+            <div className="flex flex-wrap sm:flex-nowrap gap-2 w-full sm:w-auto">
+              <Button
+                onClick={openNewStaff}
+                className="w-full sm:w-auto"
+                disabled={!canAddStaff}
+                title={canAddStaff ? `Add a staff account (${staffSlotsLeft} remaining in plan)` : staffCreateCheck.message}
+              >
+                + Add Staff
+              </Button>
+              {isDev && (
                 <Button variant="secondary" onClick={openNewUser} className="w-full sm:w-auto">+ New User</Button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
           {isDeveloper && (
             <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
@@ -417,21 +427,18 @@ const Users: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label>Role</Label>
-              <Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as UserRole })} disabled={!isDeveloper && !isSuper}>
+              <Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as UserRole })} disabled={!isDev}>
                 {(planLimits.staff > 0 || form.role === "staff") && <option value="staff">Staff</option>}
-                {(isDev || isSuper) && (planLimits.admin > 0 || form.role === "admin") && <option value="admin">Admin</option>}
-                {(isDev || isSuper) && (planLimits.superadmin > 0 || form.role === "superadmin") && <option value="superadmin">Super Admin</option>}
+                {isDev && (planLimits.admin > 0 || form.role === "admin") && <option value="admin">Admin</option>}
+                {isDev && (planLimits.superadmin > 0 || form.role === "superadmin") && <option value="superadmin">Super Admin</option>}
                 {isDev && <option value="developer">Developer</option>}
               </Select>
               {isDev && (
-                <p className="text-[11px] text-violet-500 dark:text-violet-300 mt-1">Roles are limited by the active Account Plan quotas. Developer accounts are not counted.</p>
+                <p className="text-[11px] text-violet-500 dark:text-violet-300 mt-1">Developer has full access to create Staff, Admin, Super Admin, and Developer accounts. Accounts are limited by the active Account Plan quotas.</p>
               )}
-              {isSuper && (
-                <p className="text-[11px] text-slate-400 mt-1">Super Admins can create roles permitted within the active plan limits.</p>
-              )}
-              {isAdmin && (
+              {!isDev && (
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Admins can add Staff only. {Number.isFinite(staffSlotsLeft) ? `${staffSlotsLeft} of ${planLimits.staff} staff slot${planLimits.staff === 1 ? "" : "s"} remaining.` : "Staff accounts are unlimited on this plan."}
+                  Admins and Super Admins can add Staff only. {Number.isFinite(staffSlotsLeft) ? `${staffSlotsLeft} of ${planLimits.staff} staff slot${planLimits.staff === 1 ? "" : "s"} remaining in the Developer's plan.` : "Staff accounts are unlimited on this plan."}
                 </p>
               )}
             </div>

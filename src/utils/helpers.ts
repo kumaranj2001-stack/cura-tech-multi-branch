@@ -32,6 +32,11 @@ export const fmtDateTime = (d: string | Date) => {
   const dt = typeof d === "string" ? new Date(d) : d;
   return dt.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 };
+export const fmtTime = (d: string | Date) => {
+  const dt = typeof d === "string" ? new Date(d) : d;
+  if (isNaN(dt.getTime())) return "—";
+  return dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+};
 export const today = () => new Date().toISOString().slice(0, 10);
 export const isExpired = (d: string) => new Date(d) < new Date(new Date().toDateString());
 export const daysToExpiry = (d: string) => Math.ceil((new Date(d).getTime() - Date.now()) / 86400000);

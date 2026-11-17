@@ -130,4 +130,42 @@ const devInDevView = devUsers.some((u) => u.role === "developer" || u.username =
 console.assert(devInDevView, "Developer accounts must be visible to Developer!");
 console.log("✓ Developer accounts visible to Developer role!");
 
+// 6. Role creation permissions & Plan Quotas
+console.log("\n6. Testing staff creation restrictions & plan quota enforcement...");
+
+// Non-developer attempting to create Admin or Superadmin role must be blocked with 403
+let nonDevAdminCreateBlocked = false;
+try {
+  createUser({ username: "subadmin", name: "Sub Admin", password: "pwd1", role: "admin" }, initialUsers, "superadmin");
+} catch (e) {
+  if (e.statusCode === 403 && e.message.includes("Admins and Super Admins can only add Staff members")) {
+    nonDevAdminCreateBlocked = true;
+  }
+}
+console.assert(nonDevAdminCreateBlocked, "Super Admin attempting to create Admin must be blocked with 403");
+console.log("✓ Super Admin / Admin restricted from creating non-staff accounts!");
+
+// Developer creating Admin or Superadmin role must succeed
+const devCreateAdminRes = createUser({ username: "new_admin", name: "New Admin", password: "pwd1", role: "admin" }, initialUsers, "developer");
+console.assert(devCreateAdminRes.success === true && devCreateAdminRes.user.role === "admin", "Developer should create admin");
+console.log("✓ Developer successfully created Admin account!");
+
+// Quota limit test for Staff
+const testPlanLimits = { superadmin: 1, admin: 1, staff: 2 };
+const usersAtQuota = [
+  { id: "s1", username: "staff1", role: "staff" },
+  { id: "s2", username: "staff2", role: "staff" },
+];
+
+let quotaBlocked = false;
+try {
+  createUser({ username: "staff3", name: "Staff Three", password: "pwd1", role: "staff" }, usersAtQuota, "admin", testPlanLimits);
+} catch (e) {
+  if (e.statusCode === 400 && e.message.includes("Quota limit reached")) {
+    quotaBlocked = true;
+  }
+}
+console.assert(quotaBlocked, "Staff creation exceeding plan limit must be blocked with 400");
+console.log("✓ Staff creation dynamically capped based on developer plan quota!");
+
 console.log("\nALL USER MANAGEMENT HANDLER TESTS PASSED!");
