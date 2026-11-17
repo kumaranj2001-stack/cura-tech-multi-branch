@@ -3,6 +3,23 @@
  * Handles validation, creation, updating, and deletion for inventory medicines.
  */
 
+// In-memory medicine cache for fast fallback & synchronization
+const memoryStore = new Map();
+
+export function storeMedicineInMemory(med) {
+  if (med && med.id) {
+    memoryStore.set(med.id, med);
+  }
+}
+
+export function getInMemoryMedicines() {
+  return Array.from(memoryStore.values());
+}
+
+export function removeMedicineFromMemory(id) {
+  memoryStore.delete(id);
+}
+
 /**
  * Validates medicine payload fields.
  * Ensures Quantity, Buying Price, and Selling Price cannot be blank or invalid when submitted.
@@ -154,6 +171,8 @@ export function createMedicine(payload = {}, medicines = [], options = {}) {
     createdAt: clean.createdAt || new Date().toISOString(),
   };
 
+  storeMedicineInMemory(newMedicine);
+
   return {
     success: true,
     medicine: newMedicine,
@@ -269,6 +288,8 @@ export function updateMedicine(id, patch = {}, medicines = [], role = "") {
     updatedAt: new Date().toISOString(),
   };
 
+  storeMedicineInMemory(updatedMedicine);
+
   const updatedList = [...medicines];
   updatedList[idx] = updatedMedicine;
 
@@ -342,6 +363,7 @@ export function deleteMedicine(id, medicines = []) {
     throw err;
   }
 
+  removeMedicineFromMemory(id);
   const updatedList = medicines.filter((m) => m && m.id !== id);
   return {
     success: true,

@@ -152,15 +152,29 @@ function grnIntelligentParserPlugin(): Plugin {
         if ((url.pathname === "/api/inventory/medicines" || url.pathname === "/api/medicines" || url.pathname === "/api/inventory/search") && req.method === "GET") {
           try {
             const { db, COLLECTIONS } = await import("./server/firebase.mjs");
-            const { searchMedicines } = await import("./server/medicineHandler.mjs");
+            const { searchMedicines, getInMemoryMedicines } = await import("./server/medicineHandler.mjs");
             const { getDocs, collection } = await import("firebase/firestore");
-            const snap = await getDocs(collection(db, COLLECTIONS.medicines));
-            const firestoreDocs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            let firestoreDocs: any[] = [];
+            try {
+              const snap = await Promise.race([
+                getDocs(collection(db, COLLECTIONS.medicines)),
+                new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Firestore fetch timeout")), 1200))
+              ]);
+              firestoreDocs = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+            } catch (dbErr) {
+              console.warn("[Vite Firestore fetch warning]", (dbErr as Error).message);
+            }
+            const memDocs = getInMemoryMedicines ? getInMemoryMedicines() : [];
+            const combined = [...firestoreDocs];
+            const existingIds = new Set(combined.map((m) => m.id));
+            memDocs.forEach((m: any) => {
+              if (!existingIds.has(m.id)) combined.push(m);
+            });
             const q = url.searchParams.get("q") || url.searchParams.get("search") || "";
             const branchId = url.searchParams.get("branchId") || "";
-            const result = searchMedicines(firestoreDocs, { q, branchId });
+            const result = searchMedicines(combined, { q, branchId });
             res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ success: true, source: "firestore", count: result.length, medicines: result }));
+            res.end(JSON.stringify({ success: true, source: firestoreDocs.length ? "firestore" : "local", count: result.length, medicines: result }));
           } catch (err) {
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify({ success: true, source: "local", count: 0, medicines: [], warning: (err as Error).message }));
@@ -174,17 +188,26 @@ function grnIntelligentParserPlugin(): Plugin {
           req.on("end", async () => {
             try {
               const payload = body ? JSON.parse(body) : {};
-              const { searchMedicines } = await import("./server/medicineHandler.mjs");
+              const { searchMedicines, getInMemoryMedicines } = await import("./server/medicineHandler.mjs");
               let { medicines = [], q = "", search = "", branchId = "" } = payload;
               if (!medicines || medicines.length === 0) {
                 try {
                   const { db, COLLECTIONS } = await import("./server/firebase.mjs");
                   const { getDocs, collection } = await import("firebase/firestore");
-                  const snap = await getDocs(collection(db, COLLECTIONS.medicines));
-                  medicines = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+                  const snap = await Promise.race([
+                    getDocs(collection(db, COLLECTIONS.medicines)),
+                    new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Firestore fetch timeout")), 1200))
+                  ]);
+                  medicines = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
                 } catch {}
               }
-              const result = searchMedicines(medicines, { q: q || search, branchId });
+              const memDocs = getInMemoryMedicines ? getInMemoryMedicines() : [];
+              const combined = [...medicines];
+              const existingIds = new Set(combined.map((m) => m.id));
+              memDocs.forEach((m: any) => {
+                if (!existingIds.has(m.id)) combined.push(m);
+              });
+              const result = searchMedicines(combined, { q: q || search, branchId });
               res.setHeader("Content-Type", "application/json");
               res.end(JSON.stringify({ success: true, count: result.length, medicines: result }));
             } catch (err) {
@@ -207,17 +230,23 @@ function grnIntelligentParserPlugin(): Plugin {
               const { medicine, medicines = [], requirePurchaseDetails = true } = payload;
               const result = createMedicine(medicine || payload, medicines, { requirePurchaseDetails });
 
-              try {
-                const { db, COLLECTIONS } = await import("./server/firebase.mjs");
-                const { doc, setDoc } = await import("firebase/firestore");
-                const cleanData: Record<string, unknown> = {};
-                for (const [k, v] of Object.entries(result.medicine)) {
-                  if (v !== undefined) cleanData[k] = v;
+              // Sync to Firestore non-blocking with 1.2s timeout
+              (async () => {
+                try {
+                  const { db, COLLECTIONS } = await import("./server/firebase.mjs");
+                  const { doc, setDoc } = await import("firebase/firestore");
+                  const cleanData: Record<string, unknown> = {};
+                  for (const [k, v] of Object.entries(result.medicine)) {
+                    if (v !== undefined) cleanData[k] = v;
+                  }
+                  await Promise.race([
+                    setDoc(doc(db, COLLECTIONS.medicines, result.medicine.id), cleanData),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore write timed out")), 1200))
+                  ]);
+                } catch (dbErr) {
+                  console.warn("[Vite medicine Firestore save warning]", (dbErr as Error).message);
                 }
-                await setDoc(doc(db, COLLECTIONS.medicines, result.medicine.id), cleanData);
-              } catch (dbErr) {
-                console.warn("[Vite medicine Firestore save warning]", (dbErr as Error).message);
-              }
+              })().catch(() => {});
 
               res.statusCode = 201;
               res.setHeader("Content-Type", "application/json");
@@ -253,17 +282,23 @@ function grnIntelligentParserPlugin(): Plugin {
               const { patch, medicines = [] } = payload;
               const result = updateMedicine(id, patch || payload, medicines, role);
 
-              try {
-                const { db, COLLECTIONS } = await import("./server/firebase.mjs");
-                const { doc, setDoc } = await import("firebase/firestore");
-                const cleanData: Record<string, unknown> = {};
-                for (const [k, v] of Object.entries(result.medicine)) {
-                  if (v !== undefined) cleanData[k] = v;
+              // Sync to Firestore non-blocking with 1.2s timeout
+              (async () => {
+                try {
+                  const { db, COLLECTIONS } = await import("./server/firebase.mjs");
+                  const { doc, setDoc } = await import("firebase/firestore");
+                  const cleanData: Record<string, unknown> = {};
+                  for (const [k, v] of Object.entries(result.medicine)) {
+                    if (v !== undefined) cleanData[k] = v;
+                  }
+                  await Promise.race([
+                    setDoc(doc(db, COLLECTIONS.medicines, result.medicine.id), cleanData, { merge: true }),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore update timed out")), 1200))
+                  ]);
+                } catch (dbErr) {
+                  console.warn("[Vite medicine Firestore update warning]", (dbErr as Error).message);
                 }
-                await setDoc(doc(db, COLLECTIONS.medicines, result.medicine.id), cleanData, { merge: true });
-              } catch (dbErr) {
-                console.warn("[Vite medicine Firestore update warning]", (dbErr as Error).message);
-              }
+              })().catch(() => {});
 
               res.setHeader("Content-Type", "application/json");
               res.end(JSON.stringify(result));
@@ -293,13 +328,19 @@ function grnIntelligentParserPlugin(): Plugin {
               const { medicines = [] } = payload;
               const result = deleteMedicine(id, medicines);
 
-              try {
-                const { db, COLLECTIONS } = await import("./server/firebase.mjs");
-                const { doc, deleteDoc } = await import("firebase/firestore");
-                await deleteDoc(doc(db, COLLECTIONS.medicines, id));
-              } catch (dbErr) {
-                console.warn("[Vite medicine Firestore delete warning]", (dbErr as Error).message);
-              }
+              // Delete from Firestore non-blocking with 1.2s timeout
+              (async () => {
+                try {
+                  const { db, COLLECTIONS } = await import("./server/firebase.mjs");
+                  const { doc, deleteDoc } = await import("firebase/firestore");
+                  await Promise.race([
+                    deleteDoc(doc(db, COLLECTIONS.medicines, id)),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore delete timed out")), 1200))
+                  ]);
+                } catch (dbErr) {
+                  console.warn("[Vite medicine Firestore delete warning]", (dbErr as Error).message);
+                }
+              })().catch(() => {});
 
               res.setHeader("Content-Type", "application/json");
               res.end(JSON.stringify(result));
@@ -330,13 +371,19 @@ function grnIntelligentParserPlugin(): Plugin {
               const { updateMedicineMinStock } = await import("./server/medicineHandler.mjs");
               const result = updateMedicineMinStock(id, minStock, role, medicines);
 
-              try {
-                const { db, COLLECTIONS } = await import("./server/firebase.mjs");
-                const { doc, setDoc } = await import("firebase/firestore");
-                await setDoc(doc(db, COLLECTIONS.medicines, id), { minStock: result.medicine.minStock }, { merge: true });
-              } catch (dbErr) {
-                console.warn("[Vite minStock Firestore update warning]", (dbErr as Error).message);
-              }
+              // Update minStock in Firestore non-blocking with 1.2s timeout
+              (async () => {
+                try {
+                  const { db, COLLECTIONS } = await import("./server/firebase.mjs");
+                  const { doc, setDoc } = await import("firebase/firestore");
+                  await Promise.race([
+                    setDoc(doc(db, COLLECTIONS.medicines, id), { minStock: result.medicine.minStock }, { merge: true }),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore minStock timeout")), 1200))
+                  ]);
+                } catch (dbErr) {
+                  console.warn("[Vite minStock Firestore update warning]", (dbErr as Error).message);
+                }
+              })().catch(() => {});
 
               res.setHeader("Content-Type", "application/json");
               res.end(JSON.stringify(result));

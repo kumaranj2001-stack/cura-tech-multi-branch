@@ -2,7 +2,7 @@ import http from "node:http";
 import { parseInvoiceDocument } from "./intelligentParser.mjs";
 import { calculateBillingTotals } from "./billingCalculator.mjs";
 import { filterMedicines } from "./inventoryFilter.mjs";
-import { validateMedicinePayload, createMedicine, updateMedicine, deleteMedicine, updateMedicineMinStock, isAuthorizedForMinStock, searchMedicines } from "./medicineHandler.mjs";
+import { validateMedicinePayload, createMedicine, updateMedicine, deleteMedicine, updateMedicineMinStock, isAuthorizedForMinStock, searchMedicines, getInMemoryMedicines } from "./medicineHandler.mjs";
 import { listApprovedGrns, updateApprovedGrn, deleteApprovedGrn, isDeveloperRole } from "./approvedGrnHandler.mjs";
 import { listDoctors, createDoctor, updateDoctor, deleteDoctor } from "./doctorHandler.mjs";
 import { listUsers, createUser, updateUser, deleteUser, validateUserPayload, sanitizeUserOutput } from "./userHandler.mjs";
@@ -290,12 +290,28 @@ const server = http.createServer(async (req, res) => {
     const q = url.searchParams.get("q") || url.searchParams.get("search") || "";
     const branchId = url.searchParams.get("branchId") || "";
     try {
-      const snap = await getDocs(collection(db, COLLECTIONS.medicines));
-      const firestoreDocs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const result = searchMedicines(firestoreDocs, { q, branchId });
+      let firestoreDocs = [];
+      try {
+        const snap = await Promise.race([
+          getDocs(collection(db, COLLECTIONS.medicines)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore fetch timeout")), 1200))
+        ]);
+        firestoreDocs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      } catch (dbErr) {
+        console.warn("[Firestore medicine fetch warning]", dbErr.message);
+      }
+
+      const memDocs = getInMemoryMedicines ? getInMemoryMedicines() : [];
+      const combined = [...firestoreDocs];
+      const existingIds = new Set(combined.map((m) => m.id));
+      memDocs.forEach((m) => {
+        if (!existingIds.has(m.id)) combined.push(m);
+      });
+
+      const result = searchMedicines(combined, { q, branchId });
       return sendJson(res, 200, {
         success: true,
-        source: "firestore",
+        source: firestoreDocs.length ? "firestore" : "local",
         count: result.length,
         medicines: result,
       });
@@ -319,11 +335,21 @@ const server = http.createServer(async (req, res) => {
         let { medicines = [], q = "", search = "", branchId = "" } = payload;
         if (!medicines || medicines.length === 0) {
           try {
-            const snap = await getDocs(collection(db, COLLECTIONS.medicines));
+            const snap = await Promise.race([
+              getDocs(collection(db, COLLECTIONS.medicines)),
+              new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore fetch timeout")), 1200))
+            ]);
             medicines = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           } catch {}
         }
-        const result = searchMedicines(medicines, { q: q || search, branchId });
+        const memDocs = getInMemoryMedicines ? getInMemoryMedicines() : [];
+        const combined = [...medicines];
+        const existingIds = new Set(combined.map((m) => m.id));
+        memDocs.forEach((m) => {
+          if (!existingIds.has(m.id)) combined.push(m);
+        });
+
+        const result = searchMedicines(combined, { q: q || search, branchId });
         return sendJson(res, 200, {
           success: true,
           count: result.length,
@@ -353,16 +379,21 @@ const server = http.createServer(async (req, res) => {
 
         const result = createMedicine(medicineData, medicines, { requirePurchaseDetails });
 
-        // Save to Firestore gp_medicines
-        try {
-          const docData = {};
-          for (const [k, v] of Object.entries(result.medicine)) {
-            if (v !== undefined) docData[k] = v;
+        // Save to Firestore gp_medicines non-blocking
+        (async () => {
+          try {
+            const docData = {};
+            for (const [k, v] of Object.entries(result.medicine)) {
+              if (v !== undefined) docData[k] = v;
+            }
+            await Promise.race([
+              setDoc(doc(db, COLLECTIONS.medicines, result.medicine.id), docData),
+              new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore save timeout")), 1200))
+            ]);
+          } catch (dbErr) {
+            console.warn("[Firebase medicine save warning]", dbErr.message);
           }
-          await setDoc(doc(db, COLLECTIONS.medicines, result.medicine.id), docData);
-        } catch (dbErr) {
-          console.warn("[Firebase medicine save warning]", dbErr.message);
-        }
+        })().catch(() => {});
 
         return sendJson(res, 201, result);
       } catch (err) {
@@ -396,16 +427,21 @@ const server = http.createServer(async (req, res) => {
         const { patch, medicines = [] } = payload;
         const result = updateMedicine(id, patch || payload, medicines, role);
 
-        // Update in Firestore gp_medicines
-        try {
-          const docData = {};
-          for (const [k, v] of Object.entries(result.medicine)) {
-            if (v !== undefined) docData[k] = v;
+        // Update in Firestore gp_medicines non-blocking
+        (async () => {
+          try {
+            const docData = {};
+            for (const [k, v] of Object.entries(result.medicine)) {
+              if (v !== undefined) docData[k] = v;
+            }
+            await Promise.race([
+              setDoc(doc(db, COLLECTIONS.medicines, result.medicine.id), docData, { merge: true }),
+              new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore update timeout")), 1200))
+            ]);
+          } catch (dbErr) {
+            console.warn("[Firebase medicine update warning]", dbErr.message);
           }
-          await setDoc(doc(db, COLLECTIONS.medicines, result.medicine.id), docData, { merge: true });
-        } catch (dbErr) {
-          console.warn("[Firebase medicine update warning]", dbErr.message);
-        }
+        })().catch(() => {});
 
         return sendJson(res, 200, result);
       } catch (err) {
@@ -437,12 +473,17 @@ const server = http.createServer(async (req, res) => {
 
         const result = updateMedicineMinStock(id, minStock, role, medicines);
 
-        // Update in Firestore gp_medicines
-        try {
-          await setDoc(doc(db, COLLECTIONS.medicines, id), { minStock: result.medicine.minStock }, { merge: true });
-        } catch (dbErr) {
-          console.warn("[Firebase minStock update warning]", dbErr.message);
-        }
+        // Update in Firestore gp_medicines non-blocking
+        (async () => {
+          try {
+            await Promise.race([
+              setDoc(doc(db, COLLECTIONS.medicines, id), { minStock: result.medicine.minStock }, { merge: true }),
+              new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore minStock timeout")), 1200))
+            ]);
+          } catch (dbErr) {
+            console.warn("[Firebase minStock update warning]", dbErr.message);
+          }
+        })().catch(() => {});
 
         return sendJson(res, 200, result);
       } catch (err) {

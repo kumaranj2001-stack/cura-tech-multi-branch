@@ -436,36 +436,72 @@ const Purchases: React.FC = () => {
     };
 
     let backendMedicine: Medicine | null = null;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+
     try {
       const res = await fetch("/api/inventory/medicine", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           medicine: cleanMedicineData,
           medicines: data.medicines,
           requirePurchaseDetails: false,
         }),
       });
+      clearTimeout(timeoutId);
+
       if (res.ok) {
         const json = await res.json();
-        if (json.medicine) backendMedicine = json.medicine;
+        if (json && json.medicine) {
+          backendMedicine = json.medicine;
+        }
+      } else {
+        const errJson = await res.json().catch(() => null);
+        console.warn("[Backend Medicine Create Non-OK]", errJson);
       }
     } catch (apiErr) {
+      clearTimeout(timeoutId);
       console.warn("[Backend Medicine Create Warning]", apiErr);
     }
 
     const savedMed: Medicine = backendMedicine
-      ? { ...backendMedicine, createdAt: backendMedicine.createdAt || nowIso, branchId: backendMedicine.branchId || branchId }
+      ? {
+          ...cleanMedicineData,
+          ...backendMedicine,
+          createdAt: backendMedicine.createdAt || nowIso,
+          branchId: backendMedicine.branchId || branchId,
+        }
       : cleanMedicineData;
 
-    setData((d) => ({ ...d, medicines: [savedMed, ...d.medicines] }));
-    log("MEDICINE_CREATE", `${savedMed.name} (${savedMed.narcotic ? "Narcotic" : "Non-Narcotic"})`);
-    setNewMedSubmitting(false);
-    setNewMedModalOpen(false);
+    try {
+      // Synchronize in both React global data state and local remote cache
+      setData((d) => ({
+        ...d,
+        medicines: [savedMed, ...d.medicines.filter((m) => m.id !== savedMed.id)],
+      }));
+      setRemoteMeds((prev) => [savedMed, ...prev.filter((m) => m.id !== savedMed.id)]);
 
-    // Auto-select the newly added medicine directly into GRN line!
-    pickProduct(savedMed);
-    notify(`✓ Added "${savedMed.name}" to inventory & loaded into GRN line`);
+      log("MEDICINE_CREATE", `${savedMed.name} (${savedMed.narcotic ? "Narcotic" : "Non-Narcotic"})`);
+
+      // Cleanly close modal and reset form
+      setNewMedModalOpen(false);
+      setNewMedForm({
+        name: "",
+        narcotic: false,
+        minStock: 10,
+      });
+
+      // Auto-select the newly added medicine directly into GRN line!
+      pickProduct(savedMed);
+      notify(`✓ Added "${savedMed.name}" to inventory & loaded into GRN line`);
+    } catch (stateErr) {
+      console.error("[State sync error]", stateErr);
+      notify("⚠ Could not populate medicine");
+    } finally {
+      setNewMedSubmitting(false);
+    }
   };
 
   /* Pick medicine from inventory combobox */
@@ -2337,7 +2373,13 @@ const Purchases: React.FC = () => {
           title="Add New Medicine"
           size="md"
         >
-          <div className="space-y-4">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSaveNewMed();
+            }}
+            className="space-y-4"
+          >
             <div>
               <Label>Medicine Name *</Label>
               <Input
@@ -2377,10 +2419,10 @@ const Purchases: React.FC = () => {
             </div>
 
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
-              <Button variant="secondary" onClick={() => setNewMedModalOpen(false)}>
+              <Button type="button" variant="secondary" onClick={() => setNewMedModalOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleSaveNewMed} disabled={newMedSubmitting}>
+              <Button type="submit" disabled={newMedSubmitting}>
                 {newMedSubmitting ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" /> Adding...
@@ -2392,7 +2434,7 @@ const Purchases: React.FC = () => {
                 )}
               </Button>
             </div>
-          </div>
+          </form>
         </Modal>
       )}
     </div>
