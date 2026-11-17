@@ -266,6 +266,57 @@ function grnIntelligentParserPlugin(): Plugin {
           return;
         }
 
+        // Inventory Medicine Batch Create middleware
+        if ((url.pathname === "/api/inventory/medicines/batch" || url.pathname === "/api/inventory/medicine/batch") && req.method === "POST") {
+          let body = "";
+          req.on("data", (chunk) => { body += chunk; });
+          req.on("end", async () => {
+            try {
+              const payload = JSON.parse(body || "{}");
+              const { createMedicineBatch } = await import("./server/medicineHandler.mjs");
+              const items = payload.items || payload.medicines || (Array.isArray(payload) ? payload : []);
+              const { medicines = [], requirePurchaseDetails = true, supplier = "" } = payload;
+              const result = createMedicineBatch(items, medicines, { requirePurchaseDetails, supplier });
+
+              // Persist batch to Firestore non-blocking with writeBatch
+              void (async () => {
+                try {
+                  const { db, COLLECTIONS } = await import("./server/firebase.mjs");
+                  const { doc, writeBatch } = await import("firebase/firestore");
+                  const batch = writeBatch(db);
+                  for (const med of result.created) {
+                    const cleanData: Record<string, unknown> = {};
+                    for (const [k, v] of Object.entries(med)) {
+                      if (v !== undefined) cleanData[k] = v;
+                    }
+                    batch.set(doc(db, COLLECTIONS.medicines, med.id), cleanData);
+                  }
+                  await Promise.race([
+                    batch.commit(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore batch commit timed out")), 2500))
+                  ]);
+                } catch (dbErr) {
+                  console.warn("[Vite batch medicine Firestore save warning]", (dbErr as Error).message);
+                }
+              })();
+
+              res.statusCode = 201;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify(result));
+            } catch (err: unknown) {
+              const errorObj = err as { statusCode?: number; message?: string; errors?: string[] };
+              res.statusCode = errorObj.statusCode || 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({
+                success: false,
+                error: errorObj.message || "Failed to create medicine batch",
+                errors: errorObj.errors || [errorObj.message || "Invalid batch payload"],
+              }));
+            }
+          });
+          return;
+        }
+
         // Inventory Medicine Update middleware
         if (((url.pathname.startsWith("/api/inventory/medicine/") && req.method === "PUT") ||
              (url.pathname.startsWith("/api/medicines/") && req.method === "PUT") ||

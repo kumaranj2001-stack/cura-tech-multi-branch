@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   validateMedicinePayload,
   createMedicine,
+  createMedicineBatch,
   updateMedicine,
   deleteMedicine,
   searchMedicines,
@@ -201,5 +202,80 @@ const fullList = searchMedicines(
 assert.ok(fullList.length > 30);
 assert.ok(fullList.some((m) => m.id === catalogCreated.medicine.id));
 console.log("✓ Catalog medicine saved with zero stock and remains searchable");
+
+// 7. Multi-product batch entry tests (Inventory Module Batch Workflow)
+console.log("\n7. Testing multi-product batch entry under single supplier...");
+const batchSupplier = "Apex Lifecare Distributors";
+const batchPayloadItems = [
+  {
+    name: "Cefixime 200mg Tablet",
+    batch: "CEF-201",
+    stock: 50,
+    mfgDate: "2026-01-10",
+    expiry: "2027-12-31",
+    purchasePrice: 45.5,
+    sellingPrice: 70.0,
+    gst: 12,
+    narcotic: false,
+    minStock: 15,
+  },
+  {
+    name: "Alprazolam 0.5mg",
+    batch: "ALP-88",
+    stock: 100,
+    mfgDate: "2026-02-01",
+    expiry: "2028-01-31",
+    purchasePrice: 12.0,
+    sellingPrice: 22.5,
+    gst: 12,
+    narcotic: true,
+    minStock: 25,
+  },
+  {
+    name: "Paracetamol 650mg Fast-Action",
+    batch: "PCM-991",
+    stock: 200,
+    mfgDate: "2026-01-15",
+    expiry: "2027-06-30",
+    purchasePrice: 18.0,
+    sellingPrice: 30.0,
+    gst: 5,
+    narcotic: false,
+    minStock: 50,
+  },
+];
+
+const batchResult = createMedicineBatch(batchPayloadItems, [], {
+  supplier: batchSupplier,
+  requirePurchaseDetails: true,
+});
+
+assert.equal(batchResult.success, true);
+assert.equal(batchResult.count, 3);
+assert.equal(batchResult.created.length, 3);
+assert.equal(batchResult.created[0].supplier, batchSupplier);
+assert.equal(batchResult.created[1].supplier, batchSupplier);
+assert.equal(batchResult.created[1].narcotic, true);
+assert.equal(batchResult.created[2].gst, 5);
+assert.ok(batchResult.created[0].id.startsWith("m_"));
+console.log("✓ Successfully validated and created 3 staged medicines in a single batch");
+
+// Verify that an invalid batch item throws an informative error
+let batchRejected = false;
+try {
+  createMedicineBatch(
+    [
+      { name: "Valid Med", stock: 10, purchasePrice: 5, sellingPrice: 10, expiry: "2027-01-01" },
+      { name: "", stock: 10, purchasePrice: 5, sellingPrice: 10, expiry: "2027-01-01" }, // Blank name
+    ],
+    [],
+    { supplier: batchSupplier }
+  );
+} catch (bErr) {
+  batchRejected = true;
+  assert.ok(bErr.message.includes("Batch validation failed"));
+}
+assert.equal(batchRejected, true);
+console.log("✓ Invalid batch element properly blocked batch submission");
 
 console.log("\nALL MEDICINE HANDLER UNIT TESTS PASSED!");

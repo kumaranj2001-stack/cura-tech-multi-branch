@@ -200,6 +200,63 @@ export function createMedicine(payload = {}, medicines = [], options = {}) {
 }
 
 /**
+ * Creates multiple medicine entries in a single batch operation.
+ * Validates each item, stamps unique IDs, stores in memory, and returns created medicines.
+ *
+ * @param {Array} items - List of medicine payloads
+ * @param {Array} existingMedicines - Existing medicine list
+ * @param {Object} options - Validation options (e.g. { requirePurchaseDetails: boolean, supplier: string })
+ * @returns {Object} { success: boolean, count: number, created: Array, medicines: Array }
+ */
+export function createMedicineBatch(items = [], existingMedicines = [], options = {}) {
+  if (!Array.isArray(items) || items.length === 0) {
+    const err = new Error("Batch items array is required and cannot be empty.");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const commonSupplier = options.supplier ? String(options.supplier).trim() : "";
+  const created = [];
+  const errors = [];
+
+  items.forEach((item, index) => {
+    const itemData = { ...item };
+    if (!itemData.supplier && commonSupplier) {
+      itemData.supplier = commonSupplier;
+    }
+    const validation = validateMedicinePayload(itemData, options);
+    if (!validation.isValid) {
+      errors.push(`Item #${index + 1} (${itemData.name || "Unnamed"}): ${validation.message}`);
+    } else {
+      const clean = validation.cleanData;
+      const newMedicine = {
+        id: itemData.id || `m_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        ...clean,
+        branchId: clean.branchId || "br_main",
+        createdAt: clean.createdAt || new Date().toISOString(),
+      };
+      created.push(newMedicine);
+    }
+  });
+
+  if (errors.length > 0) {
+    const err = new Error(`Batch validation failed: ${errors.join("; ")}`);
+    err.errors = errors;
+    err.statusCode = 400;
+    throw err;
+  }
+
+  created.forEach((m) => storeMedicineInMemory(m));
+
+  return {
+    success: true,
+    count: created.length,
+    created,
+    medicines: [...created, ...existingMedicines],
+  };
+}
+
+/**
  * Checks if a given role is authorized to customize Minimum Stock.
  * Exclusively permits Developer and Admin roles (and superadmin).
  *

@@ -2,13 +2,13 @@ import http from "node:http";
 import { parseInvoiceDocument } from "./intelligentParser.mjs";
 import { calculateBillingTotals } from "./billingCalculator.mjs";
 import { filterMedicines } from "./inventoryFilter.mjs";
-import { validateMedicinePayload, createMedicine, updateMedicine, deleteMedicine, updateMedicineMinStock, isAuthorizedForMinStock, searchMedicines, getInMemoryMedicines } from "./medicineHandler.mjs";
+import { validateMedicinePayload, createMedicine, createMedicineBatch, updateMedicine, deleteMedicine, updateMedicineMinStock, isAuthorizedForMinStock, searchMedicines, getInMemoryMedicines } from "./medicineHandler.mjs";
 import { listApprovedGrns, updateApprovedGrn, deleteApprovedGrn, isDeveloperRole } from "./approvedGrnHandler.mjs";
 import { listDoctors, createDoctor, updateDoctor, deleteDoctor } from "./doctorHandler.mjs";
 import { listUsers, createUser, updateUser, deleteUser, validateUserPayload, sanitizeUserOutput } from "./userHandler.mjs";
 import { createBranch, updateBranch, deleteBranch, isBranchCreatorRole } from "./branchHandler.mjs";
 import { db, COLLECTIONS, firebaseConfig } from "./firebase.mjs";
-import { collection, doc, getDoc, getDocs, setDoc, deleteDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, setDoc, deleteDoc, writeBatch } from "firebase/firestore";
 
 const PORT = process.env.PORT || 3001;
 
@@ -397,6 +397,55 @@ const server = http.createServer(async (req, res) => {
         })();
 
         return sendJson(res, 201, { success: true, medicine: result.medicine });
+      } catch (err) {
+        return sendJson(res, err.statusCode || 400, {
+          success: false,
+          error: err.message,
+          errors: err.errors || [err.message],
+        });
+      }
+    });
+    return;
+  }
+
+  // Inventory Medicine Batch Creation Endpoint
+  if (req.method === "POST" && (url.pathname === "/api/inventory/medicines/batch" || url.pathname === "/api/inventory/medicine/batch")) {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 20 * 1024 * 1024) req.destroy();
+    });
+
+    req.on("end", async () => {
+      try {
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        const payload = JSON.parse(body);
+        const items = payload.items || payload.medicines || (Array.isArray(payload) ? payload : []);
+        const { medicines = [], requirePurchaseDetails = true, supplier = "" } = payload;
+
+        const result = createMedicineBatch(items, medicines, { requirePurchaseDetails, supplier });
+
+        // Save batch to Firestore non-blocking with writeBatch
+        void (async () => {
+          try {
+            const batch = writeBatch(db);
+            for (const med of result.created) {
+              const docData = {};
+              for (const [k, v] of Object.entries(med)) {
+                if (v !== undefined) docData[k] = v;
+              }
+              batch.set(doc(db, COLLECTIONS.medicines, med.id), docData);
+            }
+            await Promise.race([
+              batch.commit(),
+              new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore batch commit timeout")), 2500))
+            ]);
+          } catch (dbErr) {
+            console.warn("[Firebase batch medicine save warning]", dbErr.message);
+          }
+        })();
+
+        return sendJson(res, 201, result);
       } catch (err) {
         return sendJson(res, err.statusCode || 400, {
           success: false,
