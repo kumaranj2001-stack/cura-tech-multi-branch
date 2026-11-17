@@ -19,18 +19,8 @@ html.dark body {
   color: #e2e8f0;
 }
 
-/* Print styles for reports & invoices */
+/* Print styles for invoices */
 @media print {
-  @page {
-    margin: 12mm;
-    size: auto;
-  }
-  body {
-    background: #ffffff !important;
-    color: #0f172a !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
   body * { visibility: hidden; }
   #print-area, #print-area * { visibility: visible; }
   #print-area {
@@ -38,15 +28,7 @@ html.dark body {
     left: 0;
     top: 0;
     width: 100%;
-    margin: 0;
-    padding: 0;
-    background: #ffffff !important;
-  }
-  #print-area .shadow,
-  #print-area .shadow-sm,
-  #print-area .shadow-md,
-  #print-area .shadow-lg {
-    box-shadow: none !important;
+    padding: 16px;
   }
   .no-print { display: none !important; }
 }

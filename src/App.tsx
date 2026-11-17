@@ -72,11 +72,6 @@ const Inner: React.FC = () => {
     setPage("dashboard");
     return null;
   }
-  // Privacy page route: completely inaccessible to all non-developer roles
-  if (page === "privacy" && currentUser.role !== "developer") {
-    setPage("settings");
-    return null;
-  }
 
   let content: React.ReactNode;
   switch (page) {

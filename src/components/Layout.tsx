@@ -53,6 +53,7 @@ const NAV: NavItem[] = [
   { id: "users", label: "Users", icon: "🔐", adminOnly: true },
   { id: "branches", label: "Branches", icon: "🏪", developerOnly: true },
   { id: "settings", label: "Settings", icon: "⚙️", staffAllowed: true },
+  { id: "privacy", label: "Privacy Policy", icon: "🛡️", staffAllowed: true },
 ];
 
 const Layout: React.FC<{ page: PageId; setPage: (p: PageId) => void; children: React.ReactNode }> = ({ page, setPage, children }) => {
@@ -70,6 +71,7 @@ const Layout: React.FC<{ page: PageId; setPage: (p: PageId) => void; children: R
     // hide Audit Log when logging is disabled
     if (!flags.auditEnabled && n.id === "audit") return false;
     if (n.id === "branches" && !multiBranch && currentUser?.role !== "developer") return false;
+    if (n.id === "privacy" && currentUser?.role === "developer") return false;
     if (isOverseer(currentUser?.role)) return true;
     if (currentUser?.role === "admin") {
       if (n.developerOnly) return false;

@@ -1007,10 +1007,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [applyUpdate]);
 
   const clearAuditLog = useCallback(async () => {
-    if (currentUserRef.current?.role !== "developer") {
-      flashToast("Access Denied: Only Developer can clear audit logs", "err");
-      return;
-    }
     const now = new Date().toISOString();
     applyUpdate((prev) => ({ ...prev, audit: [] }));
     if (db) {
