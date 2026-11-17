@@ -386,37 +386,20 @@ const Purchases: React.FC = () => {
     }
   };
 
-  /* ── Add New Medicine Directly to Inventory Modal State ── */
+  /* ── Add New Medicine Directly to Inventory Modal State (Streamlined) ── */
   const [newMedModalOpen, setNewMedModalOpen] = useState(false);
   const [newMedSubmitting, setNewMedSubmitting] = useState(false);
   const [newMedForm, setNewMedForm] = useState({
     name: "",
-    supplier: "",
-    batch: "",
-    purchasePrice: "" as number | "",
-    sellingPrice: "" as number | "",
-    stock: "" as number | "",
-    gst: 12,
-    minStock: 10,
-    expiry: "",
-    mfgDate: "",
     narcotic: false,
+    minStock: 10 as number | "",
   });
 
   const openNewMedModal = () => {
-    const currentSup = data.suppliers.find((s) => s.id === supplierId);
     setNewMedForm({
       name: (productQuery || line.name || "").trim(),
-      supplier: currentSup ? currentSup.name : (data.suppliers[0]?.name || ""),
-      batch: line.batch || "",
-      purchasePrice: line.purchasePrice || "",
-      sellingPrice: line.mrpUnit || "",
-      stock: "",
-      gst: line.taxPct || 12,
-      minStock: 10,
-      expiry: line.expiry || "",
-      mfgDate: line.mfgDate || "",
       narcotic: false,
+      minStock: 10,
     });
     setNewMedModalOpen(true);
   };
@@ -432,18 +415,20 @@ const Purchases: React.FC = () => {
     const nowIso = new Date().toISOString();
     const branchId = currentBranch?.id || currentUser?.branchId || "br_main";
     const medId = uid("m");
+    const currentSup = data.suppliers.find((s) => s.id === supplierId);
+    const supplierName = currentSup ? currentSup.name : (data.suppliers[0]?.name || "Direct Supplier");
 
     const cleanMedicineData: Medicine = {
       id: medId,
       name: medName,
-      supplier: newMedForm.supplier.trim() || undefined,
-      batch: newMedForm.batch.trim() || undefined,
-      stock: newMedForm.stock === "" ? 0 : Math.round(Number(newMedForm.stock)),
-      purchasePrice: newMedForm.purchasePrice === "" ? 0 : Number(newMedForm.purchasePrice),
-      sellingPrice: newMedForm.sellingPrice === "" ? 0 : Number(newMedForm.sellingPrice),
-      expiry: newMedForm.expiry || undefined,
-      mfgDate: newMedForm.mfgDate || undefined,
-      gst: Number(newMedForm.gst) || 12,
+      supplier: supplierName,
+      batch: "",
+      stock: 0,
+      purchasePrice: 0,
+      sellingPrice: 0,
+      expiry: "",
+      mfgDate: "",
+      gst: line.taxPct || 12,
       narcotic: Boolean(newMedForm.narcotic),
       minStock: newMedForm.minStock === "" ? 10 : Number(newMedForm.minStock),
       branchId,
@@ -474,7 +459,7 @@ const Purchases: React.FC = () => {
       : cleanMedicineData;
 
     setData((d) => ({ ...d, medicines: [savedMed, ...d.medicines] }));
-    log("MEDICINE_CREATE", `${savedMed.name} (${savedMed.batch || "No batch"})`);
+    log("MEDICINE_CREATE", `${savedMed.name} (${savedMed.narcotic ? "Narcotic" : "Non-Narcotic"})`);
     setNewMedSubmitting(false);
     setNewMedModalOpen(false);
 
@@ -2344,19 +2329,15 @@ const Purchases: React.FC = () => {
         </Modal>
       )}
 
-      {/* ── Add New Medicine Directly to Inventory Modal ── */}
+      {/* ── Add New Medicine Modal (Streamlined for GRN Entry) ── */}
       {newMedModalOpen && (
         <Modal
           open
           onClose={() => setNewMedModalOpen(false)}
-          title="Add New Medicine to Inventory"
+          title="Add New Medicine"
           size="md"
         >
           <div className="space-y-4">
-            <div className="bg-sky-50 dark:bg-sky-950/30 p-3 rounded-lg border border-sky-200 dark:border-sky-800 text-xs text-sky-800 dark:text-sky-300">
-              Register an unlisted item directly into the inventory master. Once saved, it will be automatically selected into your active GRN line.
-            </div>
-
             <div>
               <Label>Medicine Name *</Label>
               <Input
@@ -2367,133 +2348,32 @@ const Purchases: React.FC = () => {
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <Label>Supplier</Label>
-                <Select
-                  value={newMedForm.supplier}
-                  onChange={(e) => setNewMedForm({ ...newMedForm, supplier: e.target.value })}
-                >
-                  <option value="">Select Supplier...</option>
-                  {data.suppliers.map((s) => (
-                    <option key={s.id} value={s.name}>
-                      {s.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-
-              <div>
-                <Label>Batch Number</Label>
-                <Input
-                  placeholder="e.g. B1001"
-                  value={newMedForm.batch}
-                  onChange={(e) => setNewMedForm({ ...newMedForm, batch: e.target.value })}
-                />
-              </div>
+            <div>
+              <Label>Classification *</Label>
+              <Select
+                value={newMedForm.narcotic ? "narcotic" : "non-narcotic"}
+                onChange={(e) => setNewMedForm({ ...newMedForm, narcotic: e.target.value === "narcotic" })}
+              >
+                <option value="non-narcotic">Non-Narcotic</option>
+                <option value="narcotic">Narcotic</option>
+              </Select>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              <div>
-                <Label>Buying Price (₹)</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  step={0.01}
-                  placeholder="0.00"
-                  value={newMedForm.purchasePrice}
-                  onChange={(e) =>
-                    setNewMedForm({
-                      ...newMedForm,
-                      purchasePrice: e.target.value === "" ? "" : Number(e.target.value),
-                    })
-                  }
-                />
-              </div>
-
-              <div>
-                <Label>MRP / Selling Price (₹)</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  step={0.01}
-                  placeholder="0.00"
-                  value={newMedForm.sellingPrice}
-                  onChange={(e) =>
-                    setNewMedForm({
-                      ...newMedForm,
-                      sellingPrice: e.target.value === "" ? "" : Number(e.target.value),
-                    })
-                  }
-                />
-              </div>
-
-              <div>
-                <Label>GST (%)</Label>
-                <Select
-                  value={newMedForm.gst}
-                  onChange={(e) => setNewMedForm({ ...newMedForm, gst: Number(e.target.value) })}
-                >
-                  {TAX_OPTIONS.map((t) => (
-                    <option key={t} value={t}>
-                      {t}%
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <Label>Manufacturing Date</Label>
-                <Input
-                  type="date"
-                  max={today}
-                  value={newMedForm.mfgDate}
-                  onChange={(e) => setNewMedForm({ ...newMedForm, mfgDate: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <Label>Expiry Date</Label>
-                <Input
-                  type="date"
-                  value={newMedForm.expiry}
-                  onChange={(e) => setNewMedForm({ ...newMedForm, expiry: e.target.value })}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <Label>Minimum Stock Level</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  step={1}
-                  placeholder="10"
-                  value={newMedForm.minStock}
-                  onChange={(e) =>
-                    setNewMedForm({
-                      ...newMedForm,
-                      minStock: e.target.value === "" ? 10 : Number(e.target.value),
-                    })
-                  }
-                />
-              </div>
-
-              <div className="flex items-center gap-2 pt-6">
-                <input
-                  type="checkbox"
-                  id="new-med-narcotic"
-                  className="rounded text-rose-600 focus:ring-rose-500 w-4 h-4 cursor-pointer"
-                  checked={newMedForm.narcotic}
-                  onChange={(e) => setNewMedForm({ ...newMedForm, narcotic: e.target.checked })}
-                />
-                <label htmlFor="new-med-narcotic" className="text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
-                  Narcotic / Schedule H Drug
-                </label>
-              </div>
+            <div>
+              <Label>Minimum Stock Level</Label>
+              <Input
+                type="number"
+                min={0}
+                step={1}
+                placeholder="10"
+                value={newMedForm.minStock}
+                onChange={(e) =>
+                  setNewMedForm({
+                    ...newMedForm,
+                    minStock: e.target.value === "" ? "" : Number(e.target.value),
+                  })
+                }
+              />
             </div>
 
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
@@ -2503,11 +2383,11 @@ const Purchases: React.FC = () => {
               <Button onClick={handleSaveNewMed} disabled={newMedSubmitting}>
                 {newMedSubmitting ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" /> Saving...
+                    <Loader2 className="w-4 h-4 animate-spin" /> Adding...
                   </>
                 ) : (
                   <>
-                    <Plus className="w-4 h-4" /> Save &amp; Select into GRN
+                    <Plus className="w-4 h-4" /> Add Medicine
                   </>
                 )}
               </Button>

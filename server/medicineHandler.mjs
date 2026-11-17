@@ -25,7 +25,7 @@ export function validateMedicinePayload(data = {}, options = {}) {
     errors.push("Medicine name is required.");
   }
 
-  if (!supplier) {
+  if (requirePurchaseDetails && !supplier) {
     errors.push("Supplier is required.");
   }
 
