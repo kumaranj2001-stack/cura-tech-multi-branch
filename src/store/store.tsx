@@ -1064,6 +1064,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         console.warn("[purgeAllBusinessData error]", err);
       }
     }
+    try {
+      void fetch("/api/system/purge", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-role": currentUserRef.current?.role || "developer",
+        },
+        body: JSON.stringify({ role: currentUserRef.current?.role || "developer" }),
+      });
+    } catch (apiErr) {
+      console.warn("[purgeAllBusinessData backend call warning]", apiErr);
+    }
     flashToast("All old invoices, inventory, reports & audit logs purged", "ok");
   }, [applyUpdate]);
 

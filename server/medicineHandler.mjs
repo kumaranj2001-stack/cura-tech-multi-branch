@@ -20,6 +20,10 @@ export function removeMedicineFromMemory(id) {
   memoryStore.delete(id);
 }
 
+export function clearInMemoryMedicines() {
+  memoryStore.clear();
+}
+
 /**
  * Validates medicine payload fields.
  * Ensures Quantity, Buying Price, and Selling Price cannot be blank or invalid when submitted.

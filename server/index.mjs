@@ -2,7 +2,7 @@ import http from "node:http";
 import { parseInvoiceDocument } from "./intelligentParser.mjs";
 import { calculateBillingTotals } from "./billingCalculator.mjs";
 import { filterMedicines } from "./inventoryFilter.mjs";
-import { validateMedicinePayload, createMedicine, createMedicineBatch, updateMedicine, deleteMedicine, updateMedicineMinStock, isAuthorizedForMinStock, searchMedicines, getInMemoryMedicines } from "./medicineHandler.mjs";
+import { validateMedicinePayload, createMedicine, createMedicineBatch, updateMedicine, deleteMedicine, updateMedicineMinStock, isAuthorizedForMinStock, searchMedicines, getInMemoryMedicines, clearInMemoryMedicines } from "./medicineHandler.mjs";
 import { listApprovedGrns, updateApprovedGrn, deleteApprovedGrn, isDeveloperRole } from "./approvedGrnHandler.mjs";
 import { listDoctors, createDoctor, updateDoctor, deleteDoctor } from "./doctorHandler.mjs";
 import { listUsers, createUser, updateUser, deleteUser, validateUserPayload, sanitizeUserOutput } from "./userHandler.mjs";
@@ -641,6 +641,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         const now = new Date().toISOString();
+        clearInMemoryMedicines();
         try {
           await setDoc(doc(db, COLLECTIONS.meta, "app"), {
             auditClearedAt: now,

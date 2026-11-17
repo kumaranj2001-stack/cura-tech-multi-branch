@@ -731,6 +731,58 @@ function grnIntelligentParserPlugin(): Plugin {
           return;
         }
 
+        // System Data Purge Endpoint (Developer only)
+        if ((url.pathname === "/api/system/purge" || url.pathname === "/api/data/purge") && req.method === "POST") {
+          let body = "";
+          req.on("data", (chunk) => { body += chunk; });
+          req.on("end", async () => {
+            try {
+              const payload = body ? JSON.parse(body) : {};
+              const role = payload.role || req.headers["x-user-role"] || "";
+              if (role !== "developer") {
+                res.statusCode = 403;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ success: false, error: "Access Denied: Only Developer can purge system data." }));
+                return;
+              }
+
+              const { clearInMemoryMedicines } = await import("./server/medicineHandler.mjs");
+              if (typeof clearInMemoryMedicines === "function") {
+                clearInMemoryMedicines();
+              }
+
+              const now = new Date().toISOString();
+              try {
+                const { db, COLLECTIONS } = await import("./server/firebase.mjs");
+                const { doc, setDoc } = await import("firebase/firestore");
+                await setDoc(doc(db, COLLECTIONS.meta, "app"), {
+                  auditClearedAt: now,
+                  invoicesClearedAt: now,
+                  medicinesClearedAt: now,
+                  grnsClearedAt: now,
+                  returnsClearedAt: now,
+                  counters: { invoice: 1000, grn: 500 },
+                  updatedAt: now,
+                }, { merge: true });
+              } catch (dbErr) {
+                console.warn("[Vite system purge Firestore warning]", (dbErr as Error).message);
+              }
+
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({
+                success: true,
+                message: "All old invoices, inventory tablets, audit logs, and report records purged successfully.",
+                purgedAt: now,
+              }));
+            } catch (err) {
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ success: false, error: err instanceof Error ? err.message : "Purge failed" }));
+            }
+          });
+          return;
+        }
+
         next();
       });
     },
