@@ -509,7 +509,6 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
           {isPdfEnabled && (
             <Button variant="secondary" onClick={exportPDF}><FileDown className="w-4 h-4" /> Download PDF</Button>
           )}
-          <Button onClick={openNew}>+ Add Medicine</Button>
         </CardBody>
       </Card>
 

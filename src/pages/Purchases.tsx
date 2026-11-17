@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useStore, uid } from "../store/store";
 import {
   PackagePlus, Trash2, Save, RotateCcw, Search, Plus, Minus, ReceiptText, Layers, Percent, IndianRupee,
-  Upload, FileSpreadsheet, FileText, Loader2, Sparkles, Pencil, CheckCircle2, Eye, X, AlertCircle,
+  Upload, FileSpreadsheet, FileText, Loader2, Sparkles, Pencil, CheckCircle2, Eye, X, AlertCircle, PlusCircle,
 } from "lucide-react";
 import { Card, CardBody, Button, Input, Label, Select, Modal, Badge } from "../components/ui";
 import { flashToast, fmtCurrency } from "../utils/helpers";
@@ -89,7 +89,7 @@ function calcLine(l: Line) {
 const TAX_OPTIONS = [0, 5, 12, 18, 28];
 
 const Purchases: React.FC = () => {
-  const { data, setData, currentUser, log, flags } = useStore();
+  const { data, setData, currentUser, currentBranch, log, flags } = useStore();
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -105,6 +105,34 @@ const Purchases: React.FC = () => {
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const comboRef = useRef<HTMLDivElement | null>(null);
+
+  /* Direct Add New Medicine Modal state */
+  const [addMedOpen, setAddMedOpen] = useState(false);
+  const [addMedForm, setAddMedForm] = useState({
+    name: "",
+    supplier: "",
+    gst: 12,
+    narcotic: false,
+    minStock: 10,
+  });
+  const [addMedSubmitting, setAddMedSubmitting] = useState(false);
+  const [addMedError, setAddMedError] = useState("");
+
+  const openAddMedModal = (initialName?: string) => {
+    const defaultSup =
+      data.suppliers.find((s) => s.id === supplierId)?.name ||
+      (data.suppliers.length > 0 ? data.suppliers[0].name : "");
+    const qName = (initialName || productQuery || line.name || "").trim();
+    setAddMedForm({
+      name: qName,
+      supplier: defaultSup,
+      gst: line.taxPct || 12,
+      narcotic: false,
+      minStock: 10,
+    });
+    setAddMedError("");
+    setAddMedOpen(true);
+  };
 
   /* product list */
   const [lines, setLines] = useState<Line[]>([]);
@@ -375,14 +403,288 @@ const Purchases: React.FC = () => {
     });
   };
 
-  const handleGrnNav = (e: React.KeyboardEvent, nextId: string, prevId?: string) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      if (e.shiftKey && prevId) {
-        focusGrnField(prevId);
+  /* Handle direct creation of new medicine into inventory */
+  const handleSaveNewMedicine = async () => {
+    setAddMedError("");
+    const name = addMedForm.name.trim();
+    const supplier = addMedForm.supplier.trim();
+    if (!name) {
+      setAddMedError("Medicine name is mandatory.");
+      return;
+    }
+    if (!supplier) {
+      setAddMedError("Supplier / vendor is mandatory.");
+      return;
+    }
+
+    setAddMedSubmitting(true);
+    try {
+      const nowIso = new Date().toISOString();
+      const branchId = currentBranch?.id || currentUser?.branchId || "br_main";
+      const newMedPayload: Medicine = {
+        id: uid("m"),
+        name,
+        supplier,
+        batch: "",
+        stock: 0,
+        purchasePrice: 0,
+        sellingPrice: 0,
+        expiry: "",
+        mfgDate: "",
+        gst: Number(addMedForm.gst) || 12,
+        narcotic: Boolean(addMedForm.narcotic),
+        minStock: Number(addMedForm.minStock) || 10,
+        branchId,
+        createdAt: nowIso,
+      };
+
+      const res = await fetch("/api/inventory/medicine", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          medicine: newMedPayload,
+          medicines: data.medicines,
+          requirePurchaseDetails: false,
+        }),
+      });
+
+      let createdMed: Medicine = newMedPayload;
+      if (res.ok) {
+        const json = await res.json();
+        if (json.medicine) createdMed = json.medicine;
       } else {
-        focusGrnField(nextId);
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.error || "Failed to create medicine in backend");
       }
+
+      // If no supplier on header yet, auto-select this supplier
+      if (!supplierId) {
+        const supMatch = data.suppliers.find((s) => s.name.trim().toLowerCase() === supplier.toLowerCase());
+        if (supMatch) setSupplierId(supMatch.id);
+      }
+
+      // Update store and remote state
+      setData((d) => ({
+        ...d,
+        medicines: [createdMed, ...d.medicines.filter((m) => m.id !== createdMed.id)],
+      }));
+      setRemoteMeds((prev) => [createdMed, ...prev.filter((m) => m.id !== createdMed.id)]);
+
+      log("MEDICINE_CREATE", `${createdMed.name} (Direct from GRN Entry)`);
+      flashToast(`✓ "${createdMed.name}" added to inventory!`, "ok");
+
+      setAddMedOpen(false);
+
+      // Auto-select the newly created medicine into current GRN line and focus receiving quantity
+      pickProduct(createdMed);
+    } catch (err: any) {
+      setAddMedError(err?.message || "Failed to add medicine. Please try again.");
+    } finally {
+      setAddMedSubmitting(false);
+    }
+  };
+
+  /* Sequential Enter navigation helper with rigorous validation */
+  const handleGrnFieldEnter = (fieldId: string, e: React.KeyboardEvent) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+
+    // Shift + Enter: move backward to previous field
+    if (e.shiftKey) {
+      const prevMap: Record<string, string> = {
+        "grn-invoice-no": "grn-supplier",
+        "grn-receipt-date": "grn-invoice-no",
+        "grn-product-name": "grn-receipt-date",
+        "grn-rec-qty": "grn-product-name",
+        "grn-uom": "grn-rec-qty",
+        "grn-free-qty": "grn-uom",
+        "grn-buy-price": "grn-free-qty",
+        "grn-disc-pct": "grn-buy-price",
+        "grn-tax-pct": "grn-disc-pct",
+        "grn-mrp-unit": "grn-tax-pct",
+        "grn-batch": "grn-mrp-unit",
+        "grn-mfg-date": "grn-batch",
+        "grn-expiry": "grn-mfg-date",
+        "grn-add-btn": "grn-expiry",
+      };
+      if (prevMap[fieldId]) {
+        focusGrnField(prevMap[fieldId]);
+      }
+      return;
+    }
+
+    // Rigorous validation: leaving mandatory fields empty blocks progression and retains focus
+    switch (fieldId) {
+      case "grn-supplier": {
+        if (!supplierId || !supplierId.trim()) {
+          notify("⚠ Supplier is mandatory. Please select a supplier before proceeding.");
+          focusGrnField("grn-supplier");
+          return;
+        }
+        focusGrnField("grn-invoice-no");
+        return;
+      }
+      case "grn-invoice-no": {
+        if (!invoiceNumber || !invoiceNumber.trim()) {
+          notify("⚠ Supplier invoice number is mandatory. Please enter the invoice number.");
+          focusGrnField("grn-invoice-no");
+          return;
+        }
+        focusGrnField("grn-receipt-date");
+        return;
+      }
+      case "grn-receipt-date": {
+        if (!date || !date.trim()) {
+          notify("⚠ Receipt date is mandatory. Please enter a valid date.");
+          focusGrnField("grn-receipt-date");
+          return;
+        }
+        if (date > today) {
+          notify("⚠ Receipt date cannot be in the future.");
+          focusGrnField("grn-receipt-date");
+          return;
+        }
+        focusGrnField("grn-product-name");
+        return;
+      }
+      case "grn-product-name": {
+        const q = (productQuery || line.name || "").trim().toLowerCase();
+        if (!q) {
+          notify("⚠ Product name is mandatory. Please search and select an inventory medicine.");
+          focusGrnField("grn-product-name");
+          setComboOpen(true);
+          return;
+        }
+        // If an item in combobox dropdown is currently highlighted via arrow keys:
+        if (selectedIndex >= 0 && productMatches[selectedIndex]) {
+          pickProduct(productMatches[selectedIndex]);
+          return;
+        }
+        // If there is exactly 1 match in search results, auto-select it:
+        if (productMatches.length === 1) {
+          pickProduct(productMatches[0]);
+          return;
+        }
+        // If there is an exact case-insensitive match in inventory:
+        const exact = inventoryMedicines.find((m) => m.name.trim().toLowerCase() === q);
+        if (exact) {
+          pickProduct(exact);
+          return;
+        }
+        // STRICT BLOCK: Item is unlisted or "No matching inventory found"
+        notify("⚠ Unlisted item! Medicine not found in inventory. Progression blocked until selected or added.");
+        setComboOpen(true);
+        focusGrnField("grn-product-name");
+        return;
+      }
+      case "grn-rec-qty": {
+        if (line.receivingQty === "" || Number(line.receivingQty) <= 0 || isNaN(Number(line.receivingQty))) {
+          notify("⚠ Receiving quantity (strips) is mandatory and must be greater than 0.");
+          focusGrnField("grn-rec-qty");
+          return;
+        }
+        focusGrnField("grn-uom");
+        return;
+      }
+      case "grn-uom": {
+        if (line.uomPerStrip === "" || Number(line.uomPerStrip) < 1 || isNaN(Number(line.uomPerStrip))) {
+          notify("⚠ UOM quantity per strip is mandatory and must be at least 1.");
+          focusGrnField("grn-uom");
+          return;
+        }
+        focusGrnField("grn-free-qty");
+        return;
+      }
+      case "grn-free-qty": {
+        if (line.freeQty !== "" && Number(line.freeQty) < 0) {
+          notify("⚠ Free quantity cannot be negative.");
+          focusGrnField("grn-free-qty");
+          return;
+        }
+        focusGrnField("grn-buy-price");
+        return;
+      }
+      case "grn-buy-price": {
+        if (line.purchasePrice === "" || Number(line.purchasePrice) <= 0 || isNaN(Number(line.purchasePrice))) {
+          notify("⚠ Purchase price per unit is mandatory and must be greater than 0.");
+          focusGrnField("grn-buy-price");
+          return;
+        }
+        focusGrnField("grn-disc-pct");
+        return;
+      }
+      case "grn-disc-pct": {
+        if (line.discPct !== "" && (Number(line.discPct) < 0 || Number(line.discPct) > 100)) {
+          notify("⚠ Discount % must be between 0 and 100.");
+          focusGrnField("grn-disc-pct");
+          return;
+        }
+        focusGrnField("grn-tax-pct");
+        return;
+      }
+      case "grn-tax-pct": {
+        focusGrnField("grn-mrp-unit");
+        return;
+      }
+      case "grn-mrp-unit": {
+        if (line.mrpUnit === "" || Number(line.mrpUnit) <= 0 || isNaN(Number(line.mrpUnit))) {
+          notify("⚠ MRP price per unit is mandatory and must be greater than 0.");
+          focusGrnField("grn-mrp-unit");
+          return;
+        }
+        focusGrnField("grn-batch");
+        return;
+      }
+      case "grn-batch": {
+        if (!line.batch || !line.batch.trim()) {
+          notify("⚠ Batch number is mandatory. Please enter a valid batch number.");
+          focusGrnField("grn-batch");
+          return;
+        }
+        const batchVal = validateBatchNumber({
+          batch: line.batch,
+          rowIdx: editingLineId ? lines.findIndex((x) => x.id === editingLineId) : lines.length,
+          productName: line.name,
+          totalRows: lines.length + 1,
+          allBatches: lines.map((l) => l.batch),
+        });
+        if (batchVal.isSerialAsBatch) {
+          notify("⚠ Batch number cannot be the item serial number (1, 2, 3...). Enter genuine manufacturer batch code.");
+          focusGrnField("grn-batch");
+          return;
+        }
+        if (batchVal.isHsnAsBatch) {
+          notify("⚠ Batch number appears to be an HSN code. Enter genuine manufacturer batch code.");
+          focusGrnField("grn-batch");
+          return;
+        }
+        focusGrnField("grn-mfg-date");
+        return;
+      }
+      case "grn-mfg-date": {
+        if (line.mfgDate && line.mfgDate > today) {
+          notify("⚠ Manufacturing date cannot be in the future.");
+          focusGrnField("grn-mfg-date");
+          return;
+        }
+        focusGrnField("grn-expiry");
+        return;
+      }
+      case "grn-expiry": {
+        if (!line.expiry || !line.expiry.trim()) {
+          notify("⚠ Expiry date is mandatory. Please enter an expiry date.");
+          focusGrnField("grn-expiry");
+          return;
+        }
+        focusGrnField("grn-add-btn");
+        return;
+      }
+      case "grn-add-btn": {
+        addTogether();
+        return;
+      }
+      default:
+        return;
     }
   };
 
@@ -421,8 +723,25 @@ const Purchases: React.FC = () => {
   const L = calcLine(line);
 
   const addTogether = () => {
-    if (!line.name.trim()) return notify("⚠ Please enter or select a medicine name");
-    if (!line.batch.trim()) return notify("⚠ Batch number is required");
+    if (!line.name.trim()) {
+      focusGrnField("grn-product-name");
+      return notify("⚠ Please enter or select a medicine name");
+    }
+
+    // Strict validation: must exist in inventory
+    const matchInInv = inventoryMedicines.some(
+      (m) => m.name.trim().toLowerCase() === line.name.trim().toLowerCase()
+    );
+    if (!matchInInv) {
+      focusGrnField("grn-product-name");
+      setComboOpen(true);
+      return notify("⚠ Unlisted medicine! Please select an existing inventory item or click '+ Add New Medicine' first.");
+    }
+
+    if (!line.batch.trim()) {
+      focusGrnField("grn-batch");
+      return notify("⚠ Batch number is required");
+    }
 
     // Robust validation: verify batch number is not serial number or HSN code
     const batchVal = validateBatchNumber({
@@ -434,25 +753,37 @@ const Purchases: React.FC = () => {
     });
 
     if (batchVal.isSerialAsBatch) {
+      focusGrnField("grn-batch");
       return notify("⚠ Batch number cannot be the item serial number (e.g. 1, 2, 3). Please enter the genuine manufacturer batch code.");
     }
     if (batchVal.isHsnAsBatch) {
+      focusGrnField("grn-batch");
       return notify("⚠ Batch number appears to be an HSN code. Please enter the genuine manufacturer batch code.");
     }
 
-    if (!line.expiry) return notify("⚠ Expiry date is required");
-    if (line.mfgDate && line.mfgDate > today) return notify("⚠ Manufacturing date cannot be in the future");
+    if (!line.expiry) {
+      focusGrnField("grn-expiry");
+      return notify("⚠ Expiry date is required");
+    }
+    if (line.mfgDate && line.mfgDate > today) {
+      focusGrnField("grn-mfg-date");
+      return notify("⚠ Manufacturing date cannot be in the future");
+    }
 
     if (line.receivingQty === "" || Number(line.receivingQty) <= 0) {
+      focusGrnField("grn-rec-qty");
       return notify("⚠ Receiving quantity (strips) must be greater than 0");
     }
     if (line.uomPerStrip === "" || Number(line.uomPerStrip) <= 0) {
+      focusGrnField("grn-uom");
       return notify("⚠ UOM quantity / strip must be greater than 0");
     }
     if (line.purchasePrice === "" || Number(line.purchasePrice) <= 0) {
+      focusGrnField("grn-buy-price");
       return notify("⚠ Purchase price must be greater than 0");
     }
     if (line.mrpUnit === "" || Number(line.mrpUnit) <= 0) {
+      focusGrnField("grn-mrp-unit");
       return notify("⚠ MRP price / unit must be greater than 0");
     }
 
@@ -793,7 +1124,7 @@ const Purchases: React.FC = () => {
                 tabIndex={1}
                 value={supplierId}
                 onChange={(e) => setSupplierId(e.target.value)}
-                onKeyDown={(e) => handleGrnNav(e, "grn-invoice-no")}
+                onKeyDown={(e) => handleGrnFieldEnter("grn-supplier", e)}
               >
                 <option value="">Select supplier...</option>
                 {data.suppliers.map((s) => (
@@ -810,12 +1141,12 @@ const Purchases: React.FC = () => {
                 tabIndex={2}
                 value={invoiceNumber}
                 onChange={(e) => setInvoiceNumber(e.target.value)}
-                onKeyDown={(e) => handleGrnNav(e, "grn-receipt-date", "grn-supplier")}
+                onKeyDown={(e) => handleGrnFieldEnter("grn-invoice-no", e)}
                 placeholder="Supplier invoice no"
               />
             </div>
             <div>
-              <Label>Receipt Date</Label>
+              <Label>Receipt Date *</Label>
               <Input
                 id="grn-receipt-date"
                 tabIndex={3}
@@ -830,7 +1161,7 @@ const Purchases: React.FC = () => {
                   }
                   setDate(val);
                 }}
-                onKeyDown={(e) => handleGrnNav(e, "grn-product-name", "grn-invoice-no")}
+                onKeyDown={(e) => handleGrnFieldEnter("grn-receipt-date", e)}
               />
             </div>
           </div>
@@ -840,25 +1171,47 @@ const Purchases: React.FC = () => {
       {/* ── ROW A + ROW B input form ── */}
       <Card id="grn-line-editor">
         <CardBody className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2 text-sm font-bold text-slate-700 dark:text-slate-200">
               <PackagePlus className="w-4 h-4 text-sky-600" />
               Product & Purchase Basics
             </div>
-            {editingLineId && (
-              <Badge tone="amber">Editing line from Product List</Badge>
-            )}
+            <div className="flex items-center gap-2">
+              {editingLineId && (
+                <Badge tone="amber">Editing line from Product List</Badge>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => openAddMedModal(productQuery || line.name)}
+                className="text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 font-medium shadow-sm flex items-center gap-1.5"
+                title="Add unlisted medicine directly to inventory"
+              >
+                <PlusCircle className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>+ Add New Medicine</span>
+              </Button>
+            </div>
           </div>
 
           {/* product combobox — inventory medicines */}
           <div className="relative" ref={comboRef}>
             <div className="flex items-center justify-between mb-1">
-              <Label className="mb-0">Product Name * (Select from Inventory or type to normalize)</Label>
-              {inventoryMedicines.length > 0 && (
-                <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  {inventoryMedicines.length} inventory item{inventoryMedicines.length === 1 ? "" : "s"} indexed
-                </span>
-              )}
+              <Label className="mb-0">Product Name * (Select from Inventory)</Label>
+              <div className="flex items-center gap-2">
+                {inventoryMedicines.length > 0 && (
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {inventoryMedicines.length} inventory item{inventoryMedicines.length === 1 ? "" : "s"} indexed
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => openAddMedModal(productQuery || line.name)}
+                  className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 hover:underline flex items-center gap-1"
+                >
+                  <PlusCircle className="w-3 h-3" /> Add Unlisted Item
+                </button>
+              </div>
             </div>
             <div className="relative">
               <input
@@ -883,32 +1236,31 @@ const Purchases: React.FC = () => {
                     focusGrnField("grn-receipt-date");
                     return;
                   }
-                  if (!comboOpen) {
-                    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    if (!comboOpen) {
                       setComboOpen(true);
-                    } else if (e.key === "Enter") {
-                      e.preventDefault();
-                      focusGrnField("grn-rec-qty");
+                    } else {
+                      setSelectedIndex((prev) => (prev < productMatches.length - 1 ? prev + 1 : 0));
                     }
                     return;
                   }
-                  if (e.key === "ArrowDown") {
+                  if (e.key === "ArrowUp") {
                     e.preventDefault();
-                    setSelectedIndex((prev) => (prev < productMatches.length - 1 ? prev + 1 : 0));
-                  } else if (e.key === "ArrowUp") {
-                    e.preventDefault();
-                    setSelectedIndex((prev) => (prev > 0 ? prev - 1 : productMatches.length - 1));
-                  } else if (e.key === "Enter") {
-                    e.preventDefault();
-                    if (selectedIndex >= 0 && productMatches[selectedIndex]) {
-                      pickProduct(productMatches[selectedIndex]);
+                    if (!comboOpen) {
+                      setComboOpen(true);
                     } else {
-                      setComboOpen(false);
-                      focusGrnField("grn-rec-qty");
+                      setSelectedIndex((prev) => (prev > 0 ? prev - 1 : productMatches.length - 1));
                     }
-                  } else if (e.key === "Escape") {
+                    return;
+                  }
+                  if (e.key === "Escape") {
                     setComboOpen(false);
                     setSelectedIndex(-1);
+                    return;
+                  }
+                  if (e.key === "Enter") {
+                    handleGrnFieldEnter("grn-product-name", e);
                   }
                 }}
               />
@@ -916,61 +1268,88 @@ const Purchases: React.FC = () => {
             </div>
 
             {comboOpen && (
-              <div className="absolute z-50 left-0 right-0 mt-1 max-h-72 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl divide-y divide-slate-100 dark:divide-slate-700/60">
+              <div className="absolute z-50 left-0 right-0 mt-1 max-h-80 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl divide-y divide-slate-100 dark:divide-slate-700/60">
                 {productMatches.length > 0 ? (
-                  productMatches.map((m, idx) => {
-                    const isSelected = idx === selectedIndex;
-                    return (
+                  <>
+                    {productMatches.map((m, idx) => {
+                      const isSelected = idx === selectedIndex;
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => pickProduct(m)}
+                          onMouseEnter={() => setSelectedIndex(idx)}
+                          className={`w-full text-left px-3.5 py-2.5 transition flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 ${
+                            isSelected
+                              ? "bg-sky-50 dark:bg-sky-900/40 border-l-4 border-sky-600 pl-2.5"
+                              : "hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-semibold text-sm text-slate-800 dark:text-slate-100">{m.name}</span>
+                              {m.narcotic && (
+                                <Badge tone="red" className="text-[10px] px-1.5 py-0.5">Narcotic</Badge>
+                              )}
+                              {m.batch && (
+                                <span className="inline-flex items-center text-[11px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                                  Batch: {m.batch}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
+                              <span>Stock: <b className="text-slate-700 dark:text-slate-200">{m.stock}</b></span>
+                              <span>•</span>
+                              <span>Buy: <b className="text-emerald-700 dark:text-emerald-400">₹{m.purchasePrice}</b></span>
+                              <span>•</span>
+                              <span>MRP: <b className="text-sky-700 dark:text-sky-400">₹{m.sellingPrice}</b></span>
+                              <span>•</span>
+                              <span>GST: {m.gst}%</span>
+                              {m.supplier && (
+                                <>
+                                  <span>•</span>
+                                  <span className="truncate max-w-[140px] text-slate-400">Supplier: {m.supplier}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          <div className="shrink-0 flex items-center gap-1.5 self-end sm:self-center">
+                            <Badge tone="blue">Auto-fill ↵</Badge>
+                          </div>
+                        </button>
+                      );
+                    })}
+                    <div className="p-2.5 bg-slate-50 dark:bg-slate-750 flex items-center justify-between text-xs">
+                      <span className="text-slate-500 text-[11px]">Unlisted item not in results?</span>
                       <button
-                        key={m.id}
                         type="button"
-                        onClick={() => pickProduct(m)}
-                        onMouseEnter={() => setSelectedIndex(idx)}
-                        className={`w-full text-left px-3.5 py-2.5 transition flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 ${
-                          isSelected
-                            ? "bg-sky-50 dark:bg-sky-900/40 border-l-4 border-sky-600 pl-2.5"
-                            : "hover:bg-slate-50 dark:hover:bg-slate-700/50"
-                        }`}
+                        onClick={() => openAddMedModal(productQuery || line.name)}
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 hover:underline"
                       >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold text-sm text-slate-800 dark:text-slate-100">{m.name}</span>
-                            {m.narcotic && (
-                              <Badge tone="red" className="text-[10px] px-1.5 py-0.5">Narcotic</Badge>
-                            )}
-                            {m.batch && (
-                              <span className="inline-flex items-center text-[11px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
-                                Batch: {m.batch}
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
-                            <span>Stock: <b className="text-slate-700 dark:text-slate-200">{m.stock}</b></span>
-                            <span>•</span>
-                            <span>Buy: <b className="text-emerald-700 dark:text-emerald-400">₹{m.purchasePrice}</b></span>
-                            <span>•</span>
-                            <span>MRP: <b className="text-sky-700 dark:text-sky-400">₹{m.sellingPrice}</b></span>
-                            <span>•</span>
-                            <span>GST: {m.gst}%</span>
-                            {m.supplier && (
-                              <>
-                                <span>•</span>
-                                <span className="truncate max-w-[140px] text-slate-400">Supplier: {m.supplier}</span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <div className="shrink-0 flex items-center gap-1.5 self-end sm:self-center">
-                          <Badge tone="blue">Auto-fill ↵</Badge>
-                        </div>
+                        <PlusCircle className="w-3.5 h-3.5" /> + Add New Medicine to Inventory
                       </button>
-                    );
-                  })
+                    </div>
+                  </>
                 ) : (
-                  <div className="p-3.5 text-center text-xs text-slate-500 dark:text-slate-400">
-                    No matching inventory medicine for &quot;{(productQuery || line.name).trim()}&quot;.
-                    <div className="text-[11px] text-slate-400 mt-1">
-                      You can continue typing to log a new medicine stock directly.
+                  <div className="p-4 text-center">
+                    <div className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-rose-100 dark:bg-rose-900/40 text-rose-600 mb-2">
+                      <AlertCircle className="w-5 h-5" />
+                    </div>
+                    <div className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                      No matching inventory medicine for &quot;{(productQuery || line.name).trim()}&quot;
+                    </div>
+                    <div className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5 font-medium max-w-sm mx-auto">
+                      Unlisted item! Progression is blocked until this item exists in inventory.
+                    </div>
+                    <div className="mt-3">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => openAddMedModal(productQuery || line.name)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-sm inline-flex items-center gap-1.5"
+                      >
+                        <PlusCircle className="w-3.5 h-3.5" /> Add &quot;{(productQuery || line.name).trim() || 'Item'}&quot; to Inventory
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -992,7 +1371,7 @@ const Purchases: React.FC = () => {
                 onChange={(e) =>
                   setLine({ ...line, receivingQty: e.target.value === "" ? "" : Number(e.target.value) })
                 }
-                onKeyDown={(e) => handleGrnNav(e, "grn-uom", "grn-product-name")}
+                onKeyDown={(e) => handleGrnFieldEnter("grn-rec-qty", e)}
                 placeholder="Enter strips"
               />
             </div>
@@ -1009,7 +1388,7 @@ const Purchases: React.FC = () => {
                 onChange={(e) =>
                   setLine({ ...line, uomPerStrip: e.target.value === "" ? "" : Number(e.target.value) })
                 }
-                onKeyDown={(e) => handleGrnNav(e, "grn-free-qty", "grn-rec-qty")}
+                onKeyDown={(e) => handleGrnFieldEnter("grn-uom", e)}
                 placeholder="Enter tabs/strip"
               />
             </div>
@@ -1026,7 +1405,7 @@ const Purchases: React.FC = () => {
                 onChange={(e) =>
                   setLine({ ...line, freeQty: e.target.value === "" ? "" : Number(e.target.value) })
                 }
-                onKeyDown={(e) => handleGrnNav(e, "grn-buy-price", "grn-uom")}
+                onKeyDown={(e) => handleGrnFieldEnter("grn-free-qty", e)}
                 placeholder="Free strips"
               />
             </div>
@@ -1043,7 +1422,7 @@ const Purchases: React.FC = () => {
                 onChange={(e) =>
                   setLine({ ...line, purchasePrice: e.target.value === "" ? "" : Number(e.target.value) })
                 }
-                onKeyDown={(e) => handleGrnNav(e, "grn-disc-pct", "grn-free-qty")}
+                onKeyDown={(e) => handleGrnFieldEnter("grn-buy-price", e)}
                 placeholder="Enter buy price"
               />
             </div>
@@ -1061,7 +1440,7 @@ const Purchases: React.FC = () => {
                 onChange={(e) =>
                   setLine({ ...line, discPct: e.target.value === "" ? "" : Number(e.target.value) })
                 }
-                onKeyDown={(e) => handleGrnNav(e, "grn-tax-pct", "grn-buy-price")}
+                onKeyDown={(e) => handleGrnFieldEnter("grn-disc-pct", e)}
                 placeholder="Enter disc %"
               />
             </div>
@@ -1073,7 +1452,7 @@ const Purchases: React.FC = () => {
                 className={inputCls}
                 value={line.taxPct}
                 onChange={(e) => setLine({ ...line, taxPct: Number(e.target.value) })}
-                onKeyDown={(e) => handleGrnNav(e, "grn-mrp-unit", "grn-disc-pct")}
+                onKeyDown={(e) => handleGrnFieldEnter("grn-tax-pct", e)}
               >
                 {TAX_OPTIONS.map((t) => (
                   <option key={t} value={t}>
@@ -1095,7 +1474,7 @@ const Purchases: React.FC = () => {
                 onChange={(e) =>
                   setLine({ ...line, mrpUnit: e.target.value === "" ? "" : Number(e.target.value) })
                 }
-                onKeyDown={(e) => handleGrnNav(e, "grn-batch", "grn-tax-pct")}
+                onKeyDown={(e) => handleGrnFieldEnter("grn-mrp-unit", e)}
                 placeholder="Enter MRP/unit"
               />
             </div>
@@ -1125,7 +1504,7 @@ const Purchases: React.FC = () => {
                 tabIndex={12}
                 value={line.batch}
                 onChange={(e) => setLine({ ...line, batch: e.target.value })}
-                onKeyDown={(e) => handleGrnNav(e, "grn-mfg-date", "grn-mrp-unit")}
+                onKeyDown={(e) => handleGrnFieldEnter("grn-batch", e)}
                 placeholder="e.g. B1001"
               />
             </div>
@@ -1145,7 +1524,7 @@ const Purchases: React.FC = () => {
                   }
                   setLine({ ...line, mfgDate: val });
                 }}
-                onKeyDown={(e) => handleGrnNav(e, "grn-expiry", "grn-batch")}
+                onKeyDown={(e) => handleGrnFieldEnter("grn-mfg-date", e)}
               />
             </div>
             <div>
@@ -1156,7 +1535,7 @@ const Purchases: React.FC = () => {
                 type="date"
                 value={line.expiry}
                 onChange={(e) => setLine({ ...line, expiry: e.target.value })}
-                onKeyDown={(e) => handleGrnNav(e, "grn-add-btn", "grn-mfg-date")}
+                onKeyDown={(e) => handleGrnFieldEnter("grn-expiry", e)}
               />
             </div>
           </div>
@@ -1963,6 +2342,153 @@ const Purchases: React.FC = () => {
                 }}
               >
                 Add {adjModal === "ded" ? "Deduction" : "Addition"}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ━━━━━━ Modal: Add New Medicine Directly to Inventory ━━━━━━ */}
+      {addMedOpen && (
+        <Modal
+          open
+          onClose={() => setAddMedOpen(false)}
+          title="Add New Medicine to Inventory"
+          size="md"
+        >
+          <div className="space-y-4">
+            <div className="bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 rounded-lg p-3 text-xs text-sky-800 dark:text-sky-200 flex items-start gap-2">
+              <Sparkles className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold">Direct GRN Inventory Intake</p>
+                <p className="text-[11px] text-sky-700 dark:text-sky-300 mt-0.5">
+                  Adding this unlisted item immediately indexes it into inventory and auto-selects it for this GRN line so you can continue entering batch, quantity, and pricing seamlessly.
+                </p>
+              </div>
+            </div>
+
+            {addMedError && (
+              <div className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{addMedError}</span>
+              </div>
+            )}
+
+            <div>
+              <Label>Medicine Name *</Label>
+              <Input
+                autoFocus
+                placeholder="e.g. Paracetamol 650mg, Amoxicillin 500mg"
+                value={addMedForm.name}
+                onChange={(e) => setAddMedForm({ ...addMedForm, name: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    document.getElementById("add-med-supplier")?.focus();
+                  }
+                }}
+              />
+            </div>
+
+            <div>
+              <Label>Supplier / Vendor *</Label>
+              {data.suppliers.length > 0 ? (
+                <div className="space-y-1.5">
+                  <Select
+                    id="add-med-supplier"
+                    value={addMedForm.supplier}
+                    onChange={(e) => setAddMedForm({ ...addMedForm, supplier: e.target.value })}
+                  >
+                    <option value="">-- Choose Existing Supplier --</option>
+                    {data.suppliers.map((s) => (
+                      <option key={s.id} value={s.name}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </Select>
+                  <p className="text-[11px] text-slate-400">
+                    Or type a custom supplier name if not yet listed:
+                  </p>
+                  <Input
+                    placeholder="Enter supplier name if different from list"
+                    value={addMedForm.supplier}
+                    onChange={(e) => setAddMedForm({ ...addMedForm, supplier: e.target.value })}
+                  />
+                </div>
+              ) : (
+                <Input
+                  id="add-med-supplier"
+                  placeholder="e.g. Apollo Pharma, Cipla Distributors"
+                  value={addMedForm.supplier}
+                  onChange={(e) => setAddMedForm({ ...addMedForm, supplier: e.target.value })}
+                />
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <Label>Default GST Rate (%) *</Label>
+                <Select
+                  value={addMedForm.gst}
+                  onChange={(e) => setAddMedForm({ ...addMedForm, gst: Number(e.target.value) })}
+                >
+                  {TAX_OPTIONS.map((t) => (
+                    <option key={t} value={t}>
+                      {t}% GST
+                    </option>
+                  ))}
+                </Select>
+              </div>
+
+              <div>
+                <Label>Min Stock Alert Level</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={addMedForm.minStock}
+                  onChange={(e) => setAddMedForm({ ...addMedForm, minStock: e.target.value === "" ? 0 : Number(e.target.value) })}
+                  placeholder="10"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-1">
+              <input
+                type="checkbox"
+                id="add-med-narcotic"
+                checked={addMedForm.narcotic}
+                onChange={(e) => setAddMedForm({ ...addMedForm, narcotic: e.target.checked })}
+                className="w-4 h-4 text-sky-600 rounded border-slate-300 focus:ring-sky-500"
+              />
+              <label htmlFor="add-med-narcotic" className="text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer">
+                Controlled / Narcotic Drug (Rx prescription mandatory)
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setAddMedOpen(false)}
+                disabled={addMedSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={handleSaveNewMedicine}
+                disabled={addMedSubmitting}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm flex items-center gap-1.5"
+              >
+                {addMedSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Adding...
+                  </>
+                ) : (
+                  <>
+                    <PlusCircle className="w-4 h-4" /> Save to Inventory &amp; Use in GRN
+                  </>
+                )}
               </Button>
             </div>
           </div>
