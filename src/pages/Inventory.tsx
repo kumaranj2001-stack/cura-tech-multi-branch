@@ -262,6 +262,10 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
   }, [data.medicines, q, filter, backendNarcotics]);
 
   const openNew = () => {
+    if (flags.grnModule) {
+      alert("Direct medicine addition in Inventory is disabled while 'GRN Entry & Approvals' is active. Please add new medicines through the GRN Entry workflow.");
+      return;
+    }
     setEdit(null);
     setForm(empty);
     setSupplierQuery("");
@@ -509,7 +513,9 @@ const Inventory: React.FC<InventoryProps> = ({ initialFilter, onConsumeFilter })
           {isPdfEnabled && (
             <Button variant="secondary" onClick={exportPDF}><FileDown className="w-4 h-4" /> Download PDF</Button>
           )}
-          <Button onClick={openNew}>+ Add Medicine</Button>
+          {!flags.grnModule && (
+            <Button onClick={openNew}>+ Add Medicine</Button>
+          )}
         </CardBody>
       </Card>
 

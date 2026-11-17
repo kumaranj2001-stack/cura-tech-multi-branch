@@ -105,7 +105,11 @@ const FLAG_GROUPS: {
     title: "Purchases / GRN",
     icon: Package,
     items: [
-      { key: "grnModule", label: "GRN Entry & Approvals", hint: "Hides GRN Entry, GRN Approvals and the pending-GRN dashboard card" },
+      {
+        key: "grnModule",
+        label: "GRN Entry & Approvals",
+        hint: "When enabled, hides '+ Add Medicine' in Inventory and routes stock entry through GRN. When disabled, restores direct medicine addition in Inventory.",
+      },
     ],
   },
   {
