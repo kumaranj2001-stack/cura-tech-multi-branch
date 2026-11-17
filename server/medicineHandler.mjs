@@ -51,16 +51,25 @@ export function validateMedicinePayload(data = {}, options = {}) {
     errors.push("Manufacturing date cannot be in the future.");
   }
 
-  // Stock / Quantity validation
+  const isBlank = (value) => value === undefined || value === null || value === "";
+
+  // Stock / Quantity validation.
+  // Full purchase entry requires a quantity above 0.
+  // GRN catalog registration (requirePurchaseDetails: false) may start at 0 until the receipt line is filled.
   let parsedStock = 0;
-  if (data.stock === undefined || data.stock === null || data.stock === "") {
+  if (isBlank(data.stock)) {
     if (requirePurchaseDetails) {
       errors.push("Quantity is required and cannot be blank.");
     }
   } else {
     const rawStock = Number(data.stock);
-    if (isNaN(rawStock) || rawStock <= 0) {
-      errors.push("Quantity must be a valid number greater than 0.");
+    const stockInvalid = isNaN(rawStock) || rawStock < 0 || (requirePurchaseDetails && rawStock <= 0);
+    if (stockInvalid) {
+      errors.push(
+        requirePurchaseDetails
+          ? "Quantity must be a valid number greater than 0."
+          : "Quantity must be a valid number greater than or equal to 0."
+      );
     } else {
       parsedStock = Math.round(rawStock);
     }
@@ -68,14 +77,19 @@ export function validateMedicinePayload(data = {}, options = {}) {
 
   // Buying Price validation
   let parsedPurchasePrice = 0;
-  if (data.purchasePrice === undefined || data.purchasePrice === null || data.purchasePrice === "") {
+  if (isBlank(data.purchasePrice)) {
     if (requirePurchaseDetails) {
       errors.push("Buying price is required and cannot be blank.");
     }
   } else {
     const rawPurchasePrice = Number(data.purchasePrice);
-    if (isNaN(rawPurchasePrice) || rawPurchasePrice <= 0) {
-      errors.push("Buying price must be a valid positive amount greater than 0.");
+    const priceInvalid = isNaN(rawPurchasePrice) || rawPurchasePrice < 0 || (requirePurchaseDetails && rawPurchasePrice <= 0);
+    if (priceInvalid) {
+      errors.push(
+        requirePurchaseDetails
+          ? "Buying price must be a valid positive amount greater than 0."
+          : "Buying price must be a valid amount greater than or equal to 0."
+      );
     } else {
       parsedPurchasePrice = Math.round(rawPurchasePrice * 100) / 100;
     }
@@ -83,14 +97,19 @@ export function validateMedicinePayload(data = {}, options = {}) {
 
   // Selling Price validation
   let parsedSellingPrice = 0;
-  if (data.sellingPrice === undefined || data.sellingPrice === null || data.sellingPrice === "") {
+  if (isBlank(data.sellingPrice)) {
     if (requirePurchaseDetails) {
       errors.push("Selling price is required and cannot be blank.");
     }
   } else {
     const rawSellingPrice = Number(data.sellingPrice);
-    if (isNaN(rawSellingPrice) || rawSellingPrice <= 0) {
-      errors.push("Selling price must be a valid positive amount greater than 0.");
+    const priceInvalid = isNaN(rawSellingPrice) || rawSellingPrice < 0 || (requirePurchaseDetails && rawSellingPrice <= 0);
+    if (priceInvalid) {
+      errors.push(
+        requirePurchaseDetails
+          ? "Selling price must be a valid positive amount greater than 0."
+          : "Selling price must be a valid amount greater than or equal to 0."
+      );
     } else {
       parsedSellingPrice = Math.round(rawSellingPrice * 100) / 100;
     }
@@ -345,7 +364,11 @@ export function searchMedicines(medicines = [], options = {}) {
     }
   });
 
-  return Array.from(map.values()).slice(0, 30);
+  const indexed = Array.from(map.values());
+  // Autocomplete queries stay short. A full catalog list (no query) must include
+  // newly registered medicines so the GRN product search can find them.
+  if (q) return indexed.slice(0, 30);
+  return indexed;
 }
 
 /**

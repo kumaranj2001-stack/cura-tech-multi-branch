@@ -156,4 +156,50 @@ assert.equal(supplierSearch.length, 1);
 assert.equal(supplierSearch[0].name, "Paracetamol 500");
 console.log("✓ Search by supplier name succeeded");
 
+// 6. GRN catalog registration: name + classification only, stock and prices start at 0
+console.log("\n6. Testing GRN catalog create without purchase details...");
+const catalog = validateMedicinePayload(
+  {
+    name: "at",
+    stock: 0,
+    purchasePrice: 0,
+    sellingPrice: 0,
+    narcotic: false,
+    minStock: 10,
+    supplier: "",
+    batch: "",
+    expiry: "",
+    mfgDate: "",
+  },
+  { requirePurchaseDetails: false }
+);
+assert.equal(catalog.isValid, true);
+assert.equal(catalog.cleanData.stock, 0);
+assert.equal(catalog.cleanData.purchasePrice, 0);
+assert.equal(catalog.cleanData.sellingPrice, 0);
+assert.equal(catalog.cleanData.minStock, 10);
+
+const catalogCreated = createMedicine(
+  { name: "Catalog Med GRN", stock: 0, purchasePrice: 0, sellingPrice: 0, narcotic: false, minStock: 10 },
+  [],
+  { requirePurchaseDetails: false }
+);
+assert.equal(catalogCreated.success, true);
+assert.equal(catalogCreated.medicine.name, "Catalog Med GRN");
+const catalogSearch = searchMedicines(
+  [{ id: "older", name: "Existing Item", stock: 1, purchasePrice: 1, sellingPrice: 2 }, catalogCreated.medicine],
+  { q: "catalog med" }
+);
+assert.equal(catalogSearch.length, 1);
+assert.equal(catalogSearch[0].id, catalogCreated.medicine.id);
+const fullList = searchMedicines(
+  Array.from({ length: 40 }, (_, i) => ({ id: `bulk_${i}`, name: `Bulk ${i}`, stock: 1, purchasePrice: 1, sellingPrice: 2 })).concat([
+    catalogCreated.medicine,
+  ]),
+  {}
+);
+assert.ok(fullList.length > 30);
+assert.ok(fullList.some((m) => m.id === catalogCreated.medicine.id));
+console.log("✓ Catalog medicine saved with zero stock and remains searchable");
+
 console.log("\nALL MEDICINE HANDLER UNIT TESTS PASSED!");

@@ -379,8 +379,9 @@ const server = http.createServer(async (req, res) => {
 
         const result = createMedicine(medicineData, medicines, { requirePurchaseDetails });
 
-        // Save to Firestore gp_medicines non-blocking
-        (async () => {
+        // Persist without blocking the response on a slow database.
+        // The in-memory store is already updated, so a following list/search sees the medicine.
+        void (async () => {
           try {
             const docData = {};
             for (const [k, v] of Object.entries(result.medicine)) {
@@ -388,14 +389,14 @@ const server = http.createServer(async (req, res) => {
             }
             await Promise.race([
               setDoc(doc(db, COLLECTIONS.medicines, result.medicine.id), docData),
-              new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore save timeout")), 1200))
+              new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore save timeout")), 2500))
             ]);
           } catch (dbErr) {
             console.warn("[Firebase medicine save warning]", dbErr.message);
           }
-        })().catch(() => {});
+        })();
 
-        return sendJson(res, 201, result);
+        return sendJson(res, 201, { success: true, medicine: result.medicine });
       } catch (err) {
         return sendJson(res, err.statusCode || 400, {
           success: false,

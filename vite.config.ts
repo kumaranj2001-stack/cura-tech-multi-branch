@@ -230,8 +230,9 @@ function grnIntelligentParserPlugin(): Plugin {
               const { medicine, medicines = [], requirePurchaseDetails = true } = payload;
               const result = createMedicine(medicine || payload, medicines, { requirePurchaseDetails });
 
-              // Sync to Firestore non-blocking with 1.2s timeout
-              (async () => {
+              // Persist without holding the GRN modal open. Memory is updated first
+              // so product search can read the new medicine immediately.
+              void (async () => {
                 try {
                   const { db, COLLECTIONS } = await import("./server/firebase.mjs");
                   const { doc, setDoc } = await import("firebase/firestore");
@@ -241,16 +242,16 @@ function grnIntelligentParserPlugin(): Plugin {
                   }
                   await Promise.race([
                     setDoc(doc(db, COLLECTIONS.medicines, result.medicine.id), cleanData),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore write timed out")), 1200))
+                    new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore write timed out")), 2500))
                   ]);
                 } catch (dbErr) {
                   console.warn("[Vite medicine Firestore save warning]", (dbErr as Error).message);
                 }
-              })().catch(() => {});
+              })();
 
               res.statusCode = 201;
               res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify(result));
+              res.end(JSON.stringify({ success: true, medicine: result.medicine }));
             } catch (err: unknown) {
               const errorObj = err as { statusCode?: number; message?: string; errors?: string[] };
               res.statusCode = errorObj.statusCode || 400;

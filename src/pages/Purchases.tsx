@@ -89,7 +89,7 @@ function calcLine(l: Line) {
 const TAX_OPTIONS = [0, 5, 12, 18, 28];
 
 const Purchases: React.FC = () => {
-  const { data, setData, currentUser, log, flags } = useStore();
+  const { data, setData, currentUser, currentBranch, log, flags } = useStore();
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -111,6 +111,26 @@ const Purchases: React.FC = () => {
 
   /* Remote medicines cache to ensure live backend synchronization */
   const [remoteMeds, setRemoteMeds] = useState<Medicine[]>([]);
+
+  const mergeRemoteMedicines = (incoming: Medicine[]) => {
+    setRemoteMeds((prev) => {
+      const byId = new Map<string, Medicine>();
+      for (const med of [...incoming, ...prev]) {
+        if (med?.id && !byId.has(med.id)) byId.set(med.id, med);
+      }
+      return Array.from(byId.values());
+    });
+  };
+
+  const refreshRemoteMedicines = async () => {
+    const res = await fetch("/api/inventory/medicines");
+    const json = await res.json();
+    if (res.ok && json?.success && Array.isArray(json.medicines)) {
+      mergeRemoteMedicines(json.medicines);
+      return json.medicines as Medicine[];
+    }
+    return null;
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -389,6 +409,7 @@ const Purchases: React.FC = () => {
   /* ── Add New Medicine Directly to Inventory Modal State (Streamlined) ── */
   const [newMedModalOpen, setNewMedModalOpen] = useState(false);
   const [newMedSubmitting, setNewMedSubmitting] = useState(false);
+  const [newMedError, setNewMedError] = useState("");
   const [newMedForm, setNewMedForm] = useState({
     name: "",
     narcotic: false,
@@ -396,6 +417,7 @@ const Purchases: React.FC = () => {
   });
 
   const openNewMedModal = () => {
+    setNewMedError("");
     setNewMedForm({
       name: (productQuery || line.name || "").trim(),
       narcotic: false,
@@ -404,19 +426,46 @@ const Purchases: React.FC = () => {
     setNewMedModalOpen(true);
   };
 
-  const handleSaveNewMed = async () => {
+  const closeNewMedModal = () => {
+    setNewMedError("");
+    setNewMedSubmitting(false);
+    setNewMedModalOpen(false);
+  };
+
+  const handleSaveNewMed = () => {
+    if (newMedSubmitting) return;
+
     const medName = newMedForm.name.trim();
     if (!medName) {
-      notify("⚠ Medicine name is required");
+      setNewMedError("Medicine name is required.");
+      return;
+    }
+    if (newMedForm.minStock !== "" && (!Number.isFinite(Number(newMedForm.minStock)) || Number(newMedForm.minStock) < 0)) {
+      setNewMedError("Minimum stock must be zero or greater.");
       return;
     }
 
     setNewMedSubmitting(true);
+    setNewMedError("");
+
     const nowIso = new Date().toISOString();
     const branchId = currentBranch?.id || currentUser?.branchId || "br_main";
     const medId = uid("m");
     const currentSup = data.suppliers.find((s) => s.id === supplierId);
     const supplierName = currentSup ? currentSup.name : (data.suppliers[0]?.name || "Direct Supplier");
+
+    // If medicine with the same name already exists in inventory, load it directly
+    const existingMed = data.medicines.find(
+      (m) => m.name.trim().toLowerCase() === medName.toLowerCase()
+    );
+    if (existingMed) {
+      pickProduct(existingMed);
+      setNewMedModalOpen(false);
+      setNewMedSubmitting(false);
+      setNewMedForm({ name: "", narcotic: false, minStock: 10 });
+      flashToast(`"${existingMed.name}" is already in inventory — loaded into GRN line`, "ok");
+      return;
+    }
 
     const cleanMedicineData: Medicine = {
       id: medId,
@@ -430,78 +479,72 @@ const Purchases: React.FC = () => {
       mfgDate: "",
       gst: line.taxPct || 12,
       narcotic: Boolean(newMedForm.narcotic),
-      minStock: newMedForm.minStock === "" ? 10 : Number(newMedForm.minStock),
+      minStock: newMedForm.minStock === "" ? 10 : Math.round(Number(newMedForm.minStock)),
       branchId,
       createdAt: nowIso,
     };
 
-    let backendMedicine: Medicine | null = null;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    // 1. Pipe directly into application store (exact same action as Inventory Add Medicine)
+    setData((d) => ({
+      ...d,
+      medicines: [cleanMedicineData, ...d.medicines.filter((m) => m.id !== cleanMedicineData.id)],
+    }));
 
-    try {
-      const res = await fetch("/api/inventory/medicine", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          medicine: cleanMedicineData,
-          medicines: data.medicines,
-          requirePurchaseDetails: false,
-        }),
-      });
-      clearTimeout(timeoutId);
+    // 2. Commit immediately to local remote cache so combobox/dropdown reflects it instantly
+    setRemoteMeds((prev) => [cleanMedicineData, ...prev.filter((m) => m.id !== cleanMedicineData.id)]);
 
-      if (res.ok) {
-        const json = await res.json();
-        if (json && json.medicine) {
-          backendMedicine = json.medicine;
+    // 3. Log audit entry
+    log("MEDICINE_CREATE", `${cleanMedicineData.name} (${cleanMedicineData.narcotic ? "Narcotic" : "Non-Narcotic"})`);
+
+    // 4. Auto-select into the current GRN line and focus next field
+    pickProduct(cleanMedicineData);
+
+    // 5. Cleanly close the modal and reset form
+    setNewMedModalOpen(false);
+    setNewMedSubmitting(false);
+    setNewMedForm({ name: "", narcotic: false, minStock: 10 });
+
+    // 6. Notify user
+    notify(`✓ Added "${cleanMedicineData.name}" to inventory & loaded into GRN line`);
+    flashToast(`Medicine "${cleanMedicineData.name}" added to inventory`, "ok");
+
+    // 7. Background synchronization to backend API & Firestore (non-blocking)
+    void (async () => {
+      const candidateEndpoints = [
+        "/api/inventory/medicine",
+        "http://localhost:3001/api/inventory/medicine",
+      ];
+      for (const ep of candidateEndpoints) {
+        try {
+          const controller = new AbortController();
+          const t = setTimeout(() => controller.abort(), 2500);
+          const res = await fetch(ep, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: controller.signal,
+            body: JSON.stringify({
+              medicine: cleanMedicineData,
+              medicines: data.medicines,
+              requirePurchaseDetails: false,
+            }),
+          });
+          clearTimeout(t);
+          if (res.ok) {
+            const json = await res.json().catch(() => null);
+            if (json?.medicine?.id) {
+              const backendMed = json.medicine;
+              setRemoteMeds((prev) => [
+                backendMed,
+                ...prev.filter((m) => m.id !== backendMed.id && m.id !== cleanMedicineData.id),
+              ]);
+            }
+            break;
+          }
+        } catch {
+          // data is safely stored in local state and Firestore
         }
-      } else {
-        const errJson = await res.json().catch(() => null);
-        console.warn("[Backend Medicine Create Non-OK]", errJson);
       }
-    } catch (apiErr) {
-      clearTimeout(timeoutId);
-      console.warn("[Backend Medicine Create Warning]", apiErr);
-    }
-
-    const savedMed: Medicine = backendMedicine
-      ? {
-          ...cleanMedicineData,
-          ...backendMedicine,
-          createdAt: backendMedicine.createdAt || nowIso,
-          branchId: backendMedicine.branchId || branchId,
-        }
-      : cleanMedicineData;
-
-    try {
-      // Synchronize in both React global data state and local remote cache
-      setData((d) => ({
-        ...d,
-        medicines: [savedMed, ...d.medicines.filter((m) => m.id !== savedMed.id)],
-      }));
-      setRemoteMeds((prev) => [savedMed, ...prev.filter((m) => m.id !== savedMed.id)]);
-
-      log("MEDICINE_CREATE", `${savedMed.name} (${savedMed.narcotic ? "Narcotic" : "Non-Narcotic"})`);
-
-      // Cleanly close modal and reset form
-      setNewMedModalOpen(false);
-      setNewMedForm({
-        name: "",
-        narcotic: false,
-        minStock: 10,
-      });
-
-      // Auto-select the newly added medicine directly into GRN line!
-      pickProduct(savedMed);
-      notify(`✓ Added "${savedMed.name}" to inventory & loaded into GRN line`);
-    } catch (stateErr) {
-      console.error("[State sync error]", stateErr);
-      notify("⚠ Could not populate medicine");
-    } finally {
-      setNewMedSubmitting(false);
-    }
+    })();
   };
 
   /* Pick medicine from inventory combobox */
@@ -2369,14 +2412,14 @@ const Purchases: React.FC = () => {
       {newMedModalOpen && (
         <Modal
           open
-          onClose={() => setNewMedModalOpen(false)}
+          onClose={closeNewMedModal}
           title="Add New Medicine"
           size="md"
         >
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              handleSaveNewMed();
+              void handleSaveNewMed();
             }}
             className="space-y-4"
           >
@@ -2418,20 +2461,18 @@ const Purchases: React.FC = () => {
               />
             </div>
 
+            {newMedError && (
+              <p className="text-sm text-rose-600 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-lg px-3 py-2">
+                {newMedError}
+              </p>
+            )}
+
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
-              <Button type="button" variant="secondary" onClick={() => setNewMedModalOpen(false)}>
+              <Button type="button" variant="secondary" onClick={closeNewMedModal}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={newMedSubmitting}>
-                {newMedSubmitting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" /> Adding...
-                  </>
-                ) : (
-                  <>
-                    <Plus className="w-4 h-4" /> Add Medicine
-                  </>
-                )}
+              <Button type="submit">
+                <Plus className="w-4 h-4" /> Add Medicine
               </Button>
             </div>
           </form>
