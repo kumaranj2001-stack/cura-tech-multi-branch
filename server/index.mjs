@@ -924,7 +924,8 @@ const server = http.createServer(async (req, res) => {
           } catch {}
         }
 
-        const result = createUser(payload.user || payload, existingUsers);
+        const callerRole = payload.role || req.headers["x-user-role"] || url.searchParams.get("role") || "";
+        const result = createUser(payload.user || payload, existingUsers, callerRole, currentStaffPlan, customStaffPlanLimits);
 
         // Store to Firestore gp_users
         try {

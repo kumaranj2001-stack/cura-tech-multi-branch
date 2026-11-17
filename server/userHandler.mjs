@@ -72,7 +72,11 @@ export function listUsers(users = [], options = {}, callerRole = "") {
   });
 }
 
-export function createUser(payload = {}, existingUsers = []) {
+export function createUser(payload = {}, existingUsers = [], callerRole = "", staffPlan = 5, customLimits = null) {
+  const isDevCaller = String(callerRole || "").trim().toLowerCase() === "developer";
+  const isSuperCaller = String(callerRole || "").trim().toLowerCase() === "superadmin";
+  const isAdminCaller = String(callerRole || "").trim().toLowerCase() === "admin";
+
   const validation = validateUserPayload(payload, false);
   if (!validation.valid) {
     const err = new Error(validation.errors.join("; "));
@@ -81,6 +85,36 @@ export function createUser(payload = {}, existingUsers = []) {
   }
 
   const { username, name, password, role, branchId, active } = validation.cleaned;
+
+  // RBAC checks on callerRole
+  if (!isDevCaller) {
+    if (!isSuperCaller && !isAdminCaller) {
+      const err = new Error("Access Denied: Only Developer, Super Admin, and Admin roles can create accounts.");
+      err.statusCode = 403;
+      throw err;
+    }
+    // Admin and Super Admin can strictly add Staff roles only
+    if (role !== "staff") {
+      const err = new Error("Access Denied: Super Admins and Admins can add Staff accounts only.");
+      err.statusCode = 403;
+      throw err;
+    }
+    // Dynamic quota check against Developer's staff plan
+    if (customLimits && typeof customLimits.staff === "number") {
+      const staffLimit = Math.max(0, customLimits.staff);
+      const currentStaffCount = (existingUsers || []).filter((u) => u && u.role === "staff").length;
+      if (staffLimit <= 0) {
+        const err = new Error("Access Denied: The Developer's plan does not permit adding Staff accounts.");
+        err.statusCode = 403;
+        throw err;
+      }
+      if (currentStaffCount >= staffLimit) {
+        const err = new Error(`Access Denied: Staff account limit of ${staffLimit} reached based on the Developer's plan.`);
+        err.statusCode = 403;
+        throw err;
+      }
+    }
+  }
 
   // Check username uniqueness
   const duplicate = existingUsers.find((u) => u && String(u.username).toLowerCase() === username);

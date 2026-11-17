@@ -27,7 +27,7 @@ const createRes = createUser({
   role: "staff",
   branchId: "br_main",
   active: true,
-}, initialUsers);
+}, initialUsers, "admin", 5, { staff: 10, admin: 5, superadmin: 2 });
 
 console.assert(createRes.success === true, "User creation should succeed");
 console.assert(createRes.user.username === "staff_new", "Username should match");
@@ -38,12 +38,43 @@ console.log("✓ User created successfully");
 // Duplicate username check
 let duplicateFailed = false;
 try {
-  createUser({ username: "staff_new", name: "Another", password: "pwd", role: "staff" }, createRes.users);
+  createUser({ username: "staff_new", name: "Another", password: "pwd", role: "staff" }, createRes.users, "admin", 5, { staff: 10 });
 } catch (e) {
   duplicateFailed = true;
 }
 console.assert(duplicateFailed, "Duplicate username must throw error");
 console.log("✓ Duplicate username correctly rejected");
+
+// Quota limitation check for Admin / Super Admin adding staff
+let quotaExceeded = false;
+try {
+  createUser({ username: "staff_over_quota", name: "Over Quota Staff", password: "password123", role: "staff" }, createRes.users, "admin", 5, { staff: 1 });
+} catch (e) {
+  if (e.statusCode === 403 && e.message.includes("limit")) {
+    quotaExceeded = true;
+  }
+}
+console.assert(quotaExceeded, "Adding staff beyond Developer's plan limit must be blocked with 403");
+console.log("✓ Admin staff creation beyond Developer's plan quota blocked with 403!");
+
+// Super Admin / Admin restricted from creating Admin / Super Admin roles
+let nonStaffBlocked = false;
+try {
+  createUser({ username: "admin_by_admin", name: "Admin Two", password: "password123", role: "admin" }, createRes.users, "superadmin", 5, { staff: 10 });
+} catch (e) {
+  if (e.statusCode === 403 && e.message.includes("can add Staff accounts only")) {
+    nonStaffBlocked = true;
+  }
+}
+console.assert(nonStaffBlocked, "Super Admin / Admin adding non-staff must be blocked with 403");
+console.log("✓ Super Admin and Admin restricted to adding Staff only!");
+
+// Developer complete access to add Staff, Admin, and Super Admin
+const devCreateAdmin = createUser({ username: "new_admin", name: "New Admin", password: "password123", role: "admin" }, createRes.users, "developer");
+console.assert(devCreateAdmin.success === true && devCreateAdmin.user.role === "admin", "Developer should have full access to add admin");
+const devCreateSuper = createUser({ username: "new_super", name: "New Super", password: "password123", role: "superadmin" }, devCreateAdmin.users, "developer");
+console.assert(devCreateSuper.success === true && devCreateSuper.user.role === "superadmin", "Developer should have full access to add superadmin");
+console.log("✓ Developer has complete access to create staff, admin, and superadmin!");
 
 // 3. Update User - Developer vs Super Admin / Admin
 console.log("\n3. Testing user updates (Developer full edit vs Superadmin active toggle only)...");
