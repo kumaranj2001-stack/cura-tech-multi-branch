@@ -92,14 +92,34 @@ const InvoicePrint: React.FC<{ invoice: Invoice; onClose: () => void }> = ({ inv
       a.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 4000);
       const target = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(summary)}` : `https://wa.me/?text=${encodeURIComponent(summary)}`;
-      window.open(target, "_blank");
+      const win = window.open(target, "_blank", "noopener,noreferrer");
+      if (!win) {
+        // Fallback if browser popup blocker intercepted after async PDF generation
+        const waLink = document.createElement("a");
+        waLink.href = target;
+        waLink.target = "_blank";
+        waLink.rel = "noopener noreferrer";
+        document.body.appendChild(waLink);
+        waLink.click();
+        waLink.remove();
+      }
       setSentTo({ phone: prettyPhone(invoice.patientPhone), method: "wa" });
       flashToast(phone ? `WhatsApp opened for ${prettyPhone(invoice.patientPhone)}` : "WhatsApp opened — select the customer");
     } catch (e) {
       if ((e as DOMException)?.name !== "AbortError") {
         flashToast("Could not share — PDF downloaded instead", "warn");
         const phone2 = waNumber(invoice.patientPhone);
-        window.open(phone2 ? `https://wa.me/${phone2}?text=${encodeURIComponent(summary)}` : `https://wa.me/?text=${encodeURIComponent(summary)}`, "_blank");
+        const target2 = phone2 ? `https://wa.me/${phone2}?text=${encodeURIComponent(summary)}` : `https://wa.me/?text=${encodeURIComponent(summary)}`;
+        const win2 = window.open(target2, "_blank", "noopener,noreferrer");
+        if (!win2) {
+          const waLink2 = document.createElement("a");
+          waLink2.href = target2;
+          waLink2.target = "_blank";
+          waLink2.rel = "noopener noreferrer";
+          document.body.appendChild(waLink2);
+          waLink2.click();
+          waLink2.remove();
+        }
         setSentTo({ phone: prettyPhone(invoice.patientPhone), method: "wa" });
       }
     } finally {

@@ -26,7 +26,8 @@ export function calculateBillingTotals(
   const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
   let subtotal = 0;
-  const processedItems = items.map((it) => {
+  const safeItems = Array.isArray(items) ? items : [];
+  const processedItems = safeItems.map((it) => {
     const unitPrice = Math.max(0, Number(it.price) || 0);
     const qty = Math.max(0, Number(it.qty) || 0);
     const lineTotal = round2(unitPrice * qty);

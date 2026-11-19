@@ -1,4 +1,5 @@
 import http from "node:http";
+import os from "node:os";
 import { parseInvoiceDocument } from "./intelligentParser.mjs";
 import { calculateBillingTotals } from "./billingCalculator.mjs";
 import { filterMedicines } from "./inventoryFilter.mjs";
@@ -30,6 +31,17 @@ let customStaffPlanLimits = { superadmin: 1, admin: 2, staff: 5 };
 const server = http.createServer(async (req, res) => {
   setCorsHeaders(res);
 
+  const startTime = Date.now();
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+
+  // Structured request logging
+  res.on("finish", () => {
+    const duration = Date.now() - startTime;
+    if (url.pathname !== "/api/health" || duration > 100) {
+      console.log(`[${new Date().toISOString()}] [HTTP ${res.statusCode}] ${req.method} ${url.pathname} (${duration}ms)`);
+    }
+  });
+
   // Preflight
   if (req.method === "OPTIONS") {
     res.writeHead(204);
@@ -37,14 +49,40 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
-
-  // Health check
+  // Health check with active CPU, memory, uptime, and database monitoring
   if (req.method === "GET" && (url.pathname === "/api/health" || url.pathname === "/")) {
+    const mem = process.memoryUsage();
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const cpuUsage = process.cpuUsage();
     return sendJson(res, 200, {
       status: "ok",
       service: "Guru Pharma GRN Document Parsing Backend",
       version: "1.0.0",
+      process: {
+        pid: process.pid,
+        uptimeSeconds: Math.round(process.uptime()),
+        nodeVersion: process.version,
+        platform: process.platform,
+        arch: process.arch,
+      },
+      system: {
+        cpuCores: os.cpus().length,
+        loadAvg: os.loadavg(),
+        totalMemoryMB: Math.round(totalMem / (1024 * 1024)),
+        freeMemoryMB: Math.round(freeMem / (1024 * 1024)),
+        freeMemoryPercent: Math.round((freeMem / totalMem) * 100),
+      },
+      memory: {
+        rssMB: Math.round((mem.rss / (1024 * 1024)) * 100) / 100,
+        heapTotalMB: Math.round((mem.heapTotal / (1024 * 1024)) * 100) / 100,
+        heapUsedMB: Math.round((mem.heapUsed / (1024 * 1024)) * 100) / 100,
+        externalMB: Math.round((mem.external / (1024 * 1024)) * 100) / 100,
+      },
+      cpu: {
+        userMicroseconds: cpuUsage.user,
+        systemMicroseconds: cpuUsage.system,
+      },
       firebase: {
         projectId: firebaseConfig.projectId,
         authDomain: firebaseConfig.authDomain,
@@ -52,6 +90,29 @@ const server = http.createServer(async (req, res) => {
         status: "connected",
       },
       timestamp: new Date().toISOString(),
+    });
+  }
+
+  // Active Metrics endpoint
+  if (req.method === "GET" && url.pathname === "/api/metrics") {
+    const mem = process.memoryUsage();
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    return sendJson(res, 200, {
+      success: true,
+      timestamp: new Date().toISOString(),
+      uptimeSeconds: Math.round(process.uptime()),
+      pid: process.pid,
+      cpuCores: os.cpus().length,
+      loadAvg: os.loadavg(),
+      memory: {
+        rssBytes: mem.rss,
+        heapTotalBytes: mem.heapTotal,
+        heapUsedBytes: mem.heapUsed,
+        systemFreeBytes: freeMem,
+        systemTotalBytes: totalMem,
+      },
+      inMemoryMedicinesCount: getInMemoryMedicines ? getInMemoryMedicines().length : 0,
     });
   }
 
@@ -1515,13 +1576,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     try {
-      const snap = await getDocs(collection(db, COLLECTIONS.audit));
-      const batch = writeBatch(db);
-      snap.docs.forEach((d) => batch.delete(d.ref));
       const now = new Date().toISOString();
-      batch.set(doc(db, COLLECTIONS.meta, "app"), { auditClearedAt: now, updatedAt: now }, { merge: true });
-      await batch.commit();
-      return sendJson(res, 200, { success: true, message: "Audit log cleared successfully" });
+      await setDoc(doc(db, COLLECTIONS.meta, "app"), { auditClearedAt: now, updatedAt: now }, { merge: true });
+      return sendJson(res, 200, { success: true, message: "Audit log cleared successfully", auditClearedAt: now });
     } catch (err) {
       return sendJson(res, 500, { success: false, error: err.message });
     }
@@ -1531,8 +1588,18 @@ const server = http.createServer(async (req, res) => {
   sendJson(res, 404, { success: false, error: `Route not found: ${req.method} ${url.pathname}` });
 });
 
+// Process stability handlers
+process.on("uncaughtException", (err) => {
+  console.error(`[${new Date().toISOString()}] [Server UncaughtException]`, err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error(`[${new Date().toISOString()}] [Server UnhandledRejection]`, reason);
+});
+
 server.listen(PORT, () => {
   console.log(`[GRN Parser Backend] Server running on http://localhost:${PORT}`);
   console.log(`[GRN Parser Backend] Health check: http://localhost:${PORT}/api/health`);
+  console.log(`[GRN Parser Backend] Metrics: http://localhost:${PORT}/api/metrics`);
   console.log(`[GRN Parser Backend] Parse endpoint: http://localhost:${PORT}/api/parse-invoice`);
 });

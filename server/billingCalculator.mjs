@@ -3,8 +3,21 @@
  * Line item calculation is simply unit price multiplied by quantity (price * qty).
  * The final total reflects that amount minus any discounts.
  */
-export function calculateBillingTotals(items = [], discountType = "percent", discountValue = 0) {
+export function calculateBillingTotals(itemsOrOptions = [], discountTypeArg = "percent", discountValueArg = 0) {
   const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+  // Support both (items, type, val) and single options object { items, discountType, discountValue }
+  let items = [];
+  let discountType = discountTypeArg;
+  let discountValue = discountValueArg;
+
+  if (Array.isArray(itemsOrOptions)) {
+    items = itemsOrOptions;
+  } else if (itemsOrOptions && typeof itemsOrOptions === "object") {
+    items = Array.isArray(itemsOrOptions.items) ? itemsOrOptions.items : [];
+    discountType = itemsOrOptions.discountType || itemsOrOptions.type || discountTypeArg;
+    discountValue = itemsOrOptions.discountValue ?? itemsOrOptions.discount ?? discountValueArg;
+  }
 
   let subtotal = 0;
   const processedItems = items.map((it) => {

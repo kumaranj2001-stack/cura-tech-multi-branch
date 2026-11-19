@@ -25,6 +25,11 @@ html.dark body {
     margin: 0;
     size: auto;
   }
+  html, body, #root, #root > div {
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+  }
   body {
     background: #ffffff !important;
     color: #0f172a !important;
@@ -42,6 +47,8 @@ html.dark body {
     padding: 14mm 12mm;
     background: #ffffff !important;
     box-sizing: border-box;
+    page-break-inside: auto;
+    break-inside: auto;
   }
   #print-area .shadow,
   #print-area .shadow-sm,

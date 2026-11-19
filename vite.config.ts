@@ -15,12 +15,35 @@ function grnIntelligentParserPlugin(): Plugin {
       server.middlewares.use(async (req, res, next) => {
         const url = new URL(req.url || "", "http://localhost");
 
-        if (url.pathname === "/api/health" && req.method === "GET") {
+        if ((url.pathname === "/api/health" || url.pathname === "/api/metrics") && req.method === "GET") {
+          const os = await import("node:os");
+          const mem = process.memoryUsage();
+          const totalMem = os.totalmem();
+          const freeMem = os.freemem();
+          const cpuUsage = process.cpuUsage();
           res.setHeader("Content-Type", "application/json");
           res.end(
             JSON.stringify({
               status: "ok",
               service: "Guru Pharma GRN Document Parsing (Vite Middleware)",
+              uptimeSeconds: Math.round(process.uptime()),
+              pid: process.pid,
+              system: {
+                cpuCores: os.cpus().length,
+                loadAvg: os.loadavg(),
+                totalMemoryMB: Math.round(totalMem / (1024 * 1024)),
+                freeMemoryMB: Math.round(freeMem / (1024 * 1024)),
+                freeMemoryPercent: Math.round((freeMem / totalMem) * 100),
+              },
+              memory: {
+                rssMB: Math.round((mem.rss / (1024 * 1024)) * 100) / 100,
+                heapTotalMB: Math.round((mem.heapTotal / (1024 * 1024)) * 100) / 100,
+                heapUsedMB: Math.round((mem.heapUsed / (1024 * 1024)) * 100) / 100,
+              },
+              cpu: {
+                userMicroseconds: cpuUsage.user,
+                systemMicroseconds: cpuUsage.system,
+              },
               timestamp: new Date().toISOString(),
             })
           );
