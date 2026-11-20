@@ -294,7 +294,7 @@ const Billing: React.FC = () => {
     if (!rxUrl) return;
     if (rxUrl.startsWith("data:image")) setViewRx({ url: rxUrl, type: "image", name: rxName });
     else if (rxUrl.startsWith("data:application/pdf")) setViewRx({ url: rxUrl, type: "pdf", name: rxName });
-    else window.open(rxUrl, "_blank");
+    else window.open(rxUrl, "_blank", "noopener,noreferrer");
   };
 
   const selectedPatient = patientId ? data.patients.find((p) => p.id === patientId) : undefined;
@@ -819,7 +819,7 @@ const Billing: React.FC = () => {
                       const name = rxName || selectedPatient?.prescriptionName || "prescription";
                       if (url.startsWith("data:image")) setViewRx({ url, type: "image", name });
                       else if (url.startsWith("data:application/pdf")) setViewRx({ url, type: "pdf", name });
-                      else window.open(url, "_blank");
+                      else window.open(url, "_blank", "noopener,noreferrer");
                     }}
                   >
                     👁 View Document
@@ -1215,7 +1215,7 @@ const Billing: React.FC = () => {
                   })
                   .catch(() => {
                     // Fallback: open in new tab if download fails
-                    window.open(viewRx.url, "_blank");
+                    window.open(viewRx.url, "_blank", "noopener,noreferrer");
                   });
               }}>📥 Download</Button>
               <Button onClick={() => setViewRx(null)}>Close</Button>
@@ -1403,7 +1403,7 @@ const Billing: React.FC = () => {
                         const name = rxName || selectedPatient?.prescriptionName || "prescription";
                         if (url.startsWith("data:image")) setViewRx({ url, type: "image", name });
                         else if (url.startsWith("data:application/pdf")) setViewRx({ url, type: "pdf", name });
-                        else window.open(url, "_blank");
+                        else window.open(url, "_blank", "noopener,noreferrer");
                       }}
                       className="px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 rounded-lg transition"
                     >

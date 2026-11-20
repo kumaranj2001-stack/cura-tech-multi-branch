@@ -270,3 +270,121 @@ export function sendCompressedJson(req, res, statusCode, data, headers = {}) {
   res.writeHead(statusCode);
   res.end(jsonStr);
 }
+
+/* ── 8. Cryptographic Password Hashing & Timing-Safe Verification ───────── */
+export function hashPassword(plainPassword) {
+  if (!plainPassword) return "";
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.scryptSync(plainPassword, salt, 64).toString("hex");
+  return `scrypt$${salt}$${hash}`;
+}
+
+export function verifyPassword(plainPassword, storedPassword) {
+  if (!storedPassword || !plainPassword) return false;
+  if (typeof storedPassword !== "string") return false;
+  if (storedPassword.startsWith("scrypt$")) {
+    const parts = storedPassword.split("$");
+    if (parts.length !== 3) return false;
+    const [, salt, expectedHash] = parts;
+    const actualHash = crypto.scryptSync(plainPassword, salt, 64).toString("hex");
+    return crypto.timingSafeEqual(Buffer.from(actualHash, "hex"), Buffer.from(expectedHash, "hex"));
+  }
+  // Constant-time fallback for existing legacy plaintext passwords
+  const a = Buffer.from(plainPassword);
+  const b = Buffer.from(storedPassword);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+/* ── 9. Document Identifier Sanitization (Anti-Path Traversal) ─────────── */
+export function isValidDocumentId(id) {
+  if (typeof id !== "string") return false;
+  const clean = id.trim();
+  // Valid Firestore IDs: 1 to 128 characters, alphanumeric plus dash and underscore
+  return /^[a-zA-Z0-9_-]{1,128}$/.test(clean);
+}
+
+/* ── 10. Cryptographic Session Token & RBAC Claims Engine ───────────────── */
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
+
+export function createSessionToken(user) {
+  const payload = {
+    uid: user.id || user.username,
+    username: user.username,
+    role: user.role || "staff",
+    branchId: user.branchId || "br_main",
+    exp: Date.now() + 24 * 60 * 60 * 1000, // 24-hour validity
+  };
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = crypto.createHmac("sha256", SESSION_SECRET).update(body).digest("base64url");
+  return `${body}.${signature}`;
+}
+
+export function verifySessionToken(token) {
+  if (!token || typeof token !== "string") return null;
+  const parts = token.split(".");
+  if (parts.length !== 2) return null;
+  const [body, signature] = parts;
+  const expectedSig = crypto.createHmac("sha256", SESSION_SECRET).update(body).digest("base64url");
+  try {
+    const sigA = Buffer.from(signature);
+    const sigB = Buffer.from(expectedSig);
+    if (sigA.length !== sigB.length || !crypto.timingSafeEqual(sigA, sigB)) {
+      return null;
+    }
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+    if (Date.now() > payload.exp) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+export function getCallerAuth(req) {
+  const authHeader = req.headers["authorization"] || "";
+  if (authHeader.startsWith("Bearer ")) {
+    const token = authHeader.slice(7).trim();
+    const verified = verifySessionToken(token);
+    if (verified) return verified;
+  }
+  const sessionToken = req.headers["x-session-token"];
+  if (sessionToken) {
+    const verified = verifySessionToken(sessionToken);
+    if (verified) return verified;
+  }
+  return null;
+}
+
+/* ── 11. Safe Error Formatter (Prevent Information Disclosure) ─────────── */
+export function formatSafeError(err, traceId, isProd = process.env.NODE_ENV === "production") {
+  if (!err) return { success: false, error: "An unexpected error occurred", traceId };
+  if (err.statusCode && err.statusCode < 500) {
+    return { success: false, error: err.message, traceId };
+  }
+  if (isProd) {
+    return {
+      success: false,
+      error: "Internal Server Error. Please contact system administrator.",
+      traceId,
+    };
+  }
+  return {
+    success: false,
+    error: err.message || "Internal Server Error",
+    traceId,
+  };
+}
+
+/* ── 12. CORS Origin Validator ─────────────────────────────────────────── */
+export function getSafeCorsOrigin(req) {
+  const origin = req.headers["origin"];
+  if (!origin) return "*";
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+    return origin;
+  }
+  const allowed = (process.env.ALLOWED_ORIGINS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (allowed.includes(origin)) {
+    return origin;
+  }
+  return allowed.length > 0 ? null : origin;
+}

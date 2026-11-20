@@ -21,27 +21,43 @@ import {
   retryWithBackoff,
   sendCompressedJson,
   RATE_LIMIT_TIERS,
+  hashPassword,
+  verifyPassword,
+  isValidDocumentId,
+  createSessionToken,
+  verifySessionToken,
+  getCallerAuth,
+  formatSafeError,
+  getSafeCorsOrigin,
 } from "./securityMiddleware.mjs";
 import { config } from "./config.mjs";
 
 const PORT = process.env.PORT || 3001;
 
-function setCorsHeaders(res, traceId = null) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+function setCorsHeaders(res, traceId = null, req = null) {
+  const origin = req ? getSafeCorsOrigin(req) : "*";
+  if (origin) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "Content-Type, Authorization, X-Requested-With, x-user-role, x-branch-id, Idempotency-Key, X-Idempotency-Key, X-Request-Id"
+    "Content-Type, Authorization, X-Requested-With, x-user-role, x-branch-id, Idempotency-Key, X-Idempotency-Key, X-Request-Id, x-session-token, x-dev-key"
   );
   res.setHeader(
     "Access-Control-Expose-Headers",
     "X-Request-Id, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, Content-Encoding, X-Cache-Lookup"
   );
+  res.setHeader("Vary", "Origin");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("X-XSS-Protection", "1; mode=block");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  res.setHeader("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; object-src 'none';");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  res.setHeader("Cross-Origin-Resource-Policy", "same-site");
   if (traceId) {
     res.setHeader("X-Request-Id", traceId);
   }
@@ -50,7 +66,7 @@ function setCorsHeaders(res, traceId = null) {
 function sendJson(res, statusCode, data, req = null) {
   const effectiveReq = req || res.req || null;
   const traceId = res.getHeader("X-Request-Id") || (effectiveReq ? getOrCreateTraceId(effectiveReq) : null);
-  setCorsHeaders(res, traceId);
+  setCorsHeaders(res, traceId, effectiveReq);
 
   // Automatic Idempotency Key caching for successful mutating operations
   if (effectiveReq && statusCode >= 200 && statusCode < 400 && (effectiveReq.method === "POST" || effectiveReq.method === "PUT")) {
@@ -68,6 +84,16 @@ function sendJson(res, statusCode, data, req = null) {
 
   res.writeHead(statusCode, { "Content-Type": "application/json" });
   res.end(JSON.stringify(data));
+}
+
+function sendError(res, statusCode, err, req = null) {
+  const effectiveReq = req || res.req || null;
+  const traceId = res.getHeader("X-Request-Id") || (effectiveReq ? getOrCreateTraceId(effectiveReq) : crypto.randomUUID());
+  if (statusCode >= 500) {
+    console.error(`[Internal Error trace:${traceId.slice(0, 8)}]`, err);
+  }
+  const safePayload = formatSafeError(err, traceId);
+  return sendJson(res, statusCode, safePayload, effectiveReq);
 }
 
 let currentStaffPlan = 5;
@@ -837,6 +863,9 @@ const server = http.createServer(async (req, res) => {
         const pathParts = url.pathname.split("/");
         const urlId = (url.pathname.includes("/delete")) ? null : pathParts[pathParts.length - 1];
         const id = payload.id || urlId;
+        if (!isValidDocumentId(id)) {
+          return sendJson(res, 400, { success: false, error: "Invalid resource identifier format." }, req);
+        }
         const { medicines = [] } = payload;
         const result = deleteMedicine(id, medicines);
 
@@ -847,9 +876,9 @@ const server = http.createServer(async (req, res) => {
           console.warn("[Firebase medicine delete warning]", dbErr.message);
         }
 
-        return sendJson(res, 200, result);
+        return sendJson(res, 200, result, req);
       } catch (err) {
-        return sendJson(res, err.statusCode || 400, { success: false, error: err.message });
+        return sendError(res, err.statusCode || 400, err, req);
       }
     });
     return;
@@ -862,9 +891,10 @@ const server = http.createServer(async (req, res) => {
     req.on("end", async () => {
       try {
         const payload = body ? JSON.parse(body) : {};
-        const role = payload.role || req.headers["x-user-role"] || "";
+        const auth = getCallerAuth(req);
+        const role = (auth && auth.role) || payload.role || req.headers["x-user-role"] || "";
         if (role !== "developer") {
-          return sendJson(res, 403, { success: false, error: "Access Denied: Only Developer can purge system data." });
+          return sendJson(res, 403, { success: false, error: "Access Denied: Only Developer can purge system data." }, req);
         }
 
         const now = new Date().toISOString();
@@ -887,9 +917,9 @@ const server = http.createServer(async (req, res) => {
           success: true,
           message: "All old invoices, inventory tablets, audit logs, and report records purged successfully.",
           purgedAt: now,
-        });
+        }, req);
       } catch (err) {
-        return sendJson(res, 500, { success: false, error: err.message });
+        return sendError(res, 500, err, req);
       }
     });
     return;
@@ -897,19 +927,20 @@ const server = http.createServer(async (req, res) => {
 
   // Approved GRN Management Endpoints (Developer role only)
   if (req.method === "GET" && url.pathname === "/api/grn/approved") {
-    const role = req.headers["x-user-role"] || url.searchParams.get("role") || "";
+    const auth = getCallerAuth(req);
+    const role = (auth && auth.role) || req.headers["x-user-role"] || url.searchParams.get("role") || "";
     if (!isDeveloperRole(role)) {
       return sendJson(res, 403, {
         success: false,
         error: "Access Denied: Only Developer role can view or manage approved GRN entries.",
-      });
+      }, req);
     }
 
     return sendJson(res, 200, {
       success: true,
       message: "Developer authorized for approved GRN management",
       role,
-    });
+    }, req);
   }
 
   if (req.method === "POST" && (url.pathname === "/api/grn/approved/list" || url.pathname === "/api/grn/approved/filter")) {
@@ -921,9 +952,10 @@ const server = http.createServer(async (req, res) => {
 
     req.on("end", () => {
       try {
-        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" }, req);
         const payload = JSON.parse(body);
-        const role = payload.role || req.headers["x-user-role"] || "";
+        const auth = getCallerAuth(req);
+        const role = (auth && auth.role) || payload.role || req.headers["x-user-role"] || "";
         const { grns = [], search = "", startDate, endDate } = payload;
 
         const filtered = listApprovedGrns(grns, { search, startDate, endDate }, role);
@@ -932,10 +964,10 @@ const server = http.createServer(async (req, res) => {
           success: true,
           count: filtered.length,
           grns: filtered,
-        });
+        }, req);
       } catch (err) {
         const statusCode = err.message?.includes("Access Denied") ? 403 : 500;
-        return sendJson(res, statusCode, { success: false, error: err.message });
+        return sendError(res, statusCode, err, req);
       }
     });
     return;
@@ -950,20 +982,24 @@ const server = http.createServer(async (req, res) => {
 
     req.on("end", () => {
       try {
-        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" }, req);
         const payload = JSON.parse(body);
         const urlId = url.pathname.startsWith("/api/grn/approved/") && url.pathname !== "/api/grn/approved/update"
           ? url.pathname.replace("/api/grn/approved/", "")
           : null;
         const grnId = payload.grnId || urlId;
-        const role = payload.role || req.headers["x-user-role"] || "";
+        if (!isValidDocumentId(grnId)) {
+          return sendJson(res, 400, { success: false, error: "Invalid GRN identifier format." }, req);
+        }
+        const auth = getCallerAuth(req);
+        const role = (auth && auth.role) || payload.role || req.headers["x-user-role"] || "";
         const { patchData, grns = [], medicines = [], adjustStock = true } = payload;
 
         const result = updateApprovedGrn(grnId, patchData || payload, grns, medicines, role, adjustStock);
-        return sendJson(res, 200, result);
+        return sendJson(res, 200, result, req);
       } catch (err) {
         const statusCode = err.message?.includes("Access Denied") ? 403 : 400;
-        return sendJson(res, statusCode, { success: false, error: err.message });
+        return sendError(res, statusCode, err, req);
       }
     });
     return;
@@ -983,14 +1019,18 @@ const server = http.createServer(async (req, res) => {
           ? url.pathname.replace("/api/grn/approved/", "")
           : null;
         const grnId = payload.grnId || urlId;
-        const role = payload.role || req.headers["x-user-role"] || url.searchParams.get("role") || "";
+        if (!isValidDocumentId(grnId)) {
+          return sendJson(res, 400, { success: false, error: "Invalid GRN identifier format." }, req);
+        }
+        const auth = getCallerAuth(req);
+        const role = (auth && auth.role) || payload.role || req.headers["x-user-role"] || url.searchParams.get("role") || "";
         const { grns = [], medicines = [], reverseStock = true } = payload;
 
         const result = deleteApprovedGrn(grnId, grns, medicines, role, reverseStock);
-        return sendJson(res, 200, result);
+        return sendJson(res, 200, result, req);
       } catch (err) {
         const statusCode = err.message?.includes("Access Denied") ? 403 : 400;
-        return sendJson(res, statusCode, { success: false, error: err.message });
+        return sendError(res, statusCode, err, req);
       }
     });
     return;
@@ -1102,6 +1142,9 @@ const server = http.createServer(async (req, res) => {
           ? url.pathname.replace("/api/doctors/", "")
           : null;
         const id = payload.id || urlId;
+        if (!isValidDocumentId(id)) {
+          return sendJson(res, 400, { success: false, error: "Invalid doctor identifier format." }, req);
+        }
         const { patch, doctors = [] } = payload;
         const result = updateDoctor(id, patch || payload, doctors);
 
@@ -1116,9 +1159,9 @@ const server = http.createServer(async (req, res) => {
           console.warn("[Firebase doctor update warning]", dbErr.message);
         }
 
-        return sendJson(res, 200, result);
+        return sendJson(res, 200, result, req);
       } catch (err) {
-        return sendJson(res, 400, { success: false, error: err.message });
+        return sendError(res, 400, err, req);
       }
     });
     return;
@@ -1138,6 +1181,9 @@ const server = http.createServer(async (req, res) => {
           ? url.pathname.replace("/api/doctors/", "")
           : null;
         const id = payload.id || urlId;
+        if (!isValidDocumentId(id)) {
+          return sendJson(res, 400, { success: false, error: "Invalid doctor identifier format." }, req);
+        }
         const { doctors = [] } = payload;
         const result = deleteDoctor(id, doctors);
 
@@ -1148,9 +1194,9 @@ const server = http.createServer(async (req, res) => {
           console.warn("[Firebase doctor delete warning]", dbErr.message);
         }
 
-        return sendJson(res, 200, result);
+        return sendJson(res, 200, result, req);
       } catch (err) {
-        return sendJson(res, 400, { success: false, error: err.message });
+        return sendError(res, 400, err, req);
       }
     });
     return;
@@ -1247,8 +1293,14 @@ const server = http.createServer(async (req, res) => {
         if (!matched.active) {
           return sendJson(res, 403, { success: false, error: "Account is deactivated. Contact admin." }, req);
         }
-        if (matched.password !== password) {
+        if (!verifyPassword(password, matched.password)) {
           return sendJson(res, 401, { success: false, error: "Incorrect password" }, req);
+        }
+
+        // Automatic legacy plaintext upgrade to cryptographic scrypt hash
+        if (matched.password && !String(matched.password).startsWith("scrypt$")) {
+          const upgradedHash = hashPassword(password);
+          setDoc(doc(db, COLLECTIONS.users, matched.id), { password: upgradedHash }, { merge: true }).catch(() => {});
         }
 
         // Check if MFA is required on user account
@@ -1279,11 +1331,12 @@ const server = http.createServer(async (req, res) => {
         }
 
         const safeUser = sanitizeUserOutput(matched);
-        const sessionToken = `tok_${crypto.randomUUID()}`;
+        const sessionToken = createSessionToken(safeUser);
         return sendJson(res, 200, {
           success: true,
           message: "Authentication successful",
           token: sessionToken,
+          sessionToken,
           claims: {
             role: safeUser.role,
             branchId: safeUser.branchId || "br_main",
@@ -1293,7 +1346,7 @@ const server = http.createServer(async (req, res) => {
           user: safeUser,
         }, req);
       } catch (err) {
-        return sendJson(res, 500, { success: false, error: err.message }, req);
+        return sendError(res, 500, err, req);
       }
     });
     return;
@@ -1339,7 +1392,8 @@ const server = http.createServer(async (req, res) => {
         if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
         const payload = JSON.parse(body);
         let existingUsers = payload.users || [];
-        const callerRole = payload.callerRole || req.headers["x-user-role"] || url.searchParams.get("role") || "";
+        const auth = getCallerAuth(req);
+        const callerRole = (auth && auth.role) || payload.callerRole || req.headers["x-user-role"] || url.searchParams.get("role") || "";
         const planLimits = payload.planLimits || null;
         if (!existingUsers || existingUsers.length === 0) {
           try {
@@ -1361,9 +1415,9 @@ const server = http.createServer(async (req, res) => {
           console.warn("[Firebase user save warning]", dbErr.message);
         }
 
-        return sendJson(res, 201, result);
+        return sendJson(res, 201, result, req);
       } catch (err) {
-        return sendJson(res, err.statusCode || 400, { success: false, error: err.message });
+        return sendError(res, err.statusCode || 400, err, req);
       }
     });
     return;
@@ -1378,13 +1432,17 @@ const server = http.createServer(async (req, res) => {
 
     req.on("end", async () => {
       try {
-        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" }, req);
         const payload = JSON.parse(body);
         const urlId = url.pathname.startsWith("/api/users/") && url.pathname !== "/api/users/update"
           ? url.pathname.replace("/api/users/", "")
           : null;
         const id = payload.id || urlId;
-        const callerRole = payload.role || req.headers["x-user-role"] || url.searchParams.get("role") || "";
+        if (!isValidDocumentId(id)) {
+          return sendJson(res, 400, { success: false, error: "Invalid user identifier format." }, req);
+        }
+        const auth = getCallerAuth(req);
+        const callerRole = (auth && auth.role) || payload.role || req.headers["x-user-role"] || url.searchParams.get("role") || "";
         let existingUsers = payload.users || [];
         if (!existingUsers || existingUsers.length === 0) {
           try {
@@ -1406,9 +1464,9 @@ const server = http.createServer(async (req, res) => {
           console.warn("[Firebase user update warning]", dbErr.message);
         }
 
-        return sendJson(res, 200, result);
+        return sendJson(res, 200, result, req);
       } catch (err) {
-        return sendJson(res, err.statusCode || 400, { success: false, error: err.message });
+        return sendError(res, err.statusCode || 400, err, req);
       }
     });
     return;
@@ -1428,7 +1486,11 @@ const server = http.createServer(async (req, res) => {
           ? url.pathname.replace("/api/users/", "")
           : null;
         const id = payload.id || urlId;
-        const callerRole = payload.role || req.headers["x-user-role"] || url.searchParams.get("role") || "";
+        if (!isValidDocumentId(id)) {
+          return sendJson(res, 400, { success: false, error: "Invalid user identifier format." }, req);
+        }
+        const auth = getCallerAuth(req);
+        const callerRole = (auth && auth.role) || payload.role || req.headers["x-user-role"] || url.searchParams.get("role") || "";
         let existingUsers = payload.users || [];
         if (!existingUsers || existingUsers.length === 0) {
           try {
@@ -1446,9 +1508,9 @@ const server = http.createServer(async (req, res) => {
           console.warn("[Firebase user delete warning]", dbErr.message);
         }
 
-        return sendJson(res, 200, result);
+        return sendJson(res, 200, result, req);
       } catch (err) {
-        return sendJson(res, err.statusCode || 400, { success: false, error: err.message });
+        return sendError(res, err.statusCode || 400, err, req);
       }
     });
     return;
@@ -1527,11 +1589,11 @@ const server = http.createServer(async (req, res) => {
           ? url.pathname.replace("/api/invoices/", "")
           : null;
         const id = payload.id || urlId;
-        if (!id) return sendJson(res, 400, { success: false, error: "Invoice ID required" });
+        if (!id || !isValidDocumentId(id)) return sendJson(res, 400, { success: false, error: "Invalid invoice identifier format." }, req);
         await deleteDoc(doc(db, COLLECTIONS.invoices, id));
-        return sendJson(res, 200, { success: true, message: `Invoice ${id} deleted successfully` });
+        return sendJson(res, 200, { success: true, message: `Invoice ${id} deleted successfully` }, req);
       } catch (err) {
-        return sendJson(res, 500, { success: false, error: err.message });
+        return sendError(res, 500, err, req);
       }
     });
     return;
@@ -1601,11 +1663,11 @@ const server = http.createServer(async (req, res) => {
           ? url.pathname.replace("/api/patients/", "")
           : null;
         const id = payload.id || urlId;
-        if (!id) return sendJson(res, 400, { success: false, error: "Patient ID required" });
+        if (!id || !isValidDocumentId(id)) return sendJson(res, 400, { success: false, error: "Invalid patient identifier format." }, req);
         await deleteDoc(doc(db, COLLECTIONS.patients, id));
-        return sendJson(res, 200, { success: true, message: `Patient ${id} deleted successfully` });
+        return sendJson(res, 200, { success: true, message: `Patient ${id} deleted successfully` }, req);
       } catch (err) {
-        return sendJson(res, 500, { success: false, error: err.message });
+        return sendError(res, 500, err, req);
       }
     });
     return;
@@ -1616,9 +1678,9 @@ const server = http.createServer(async (req, res) => {
     try {
       const snap = await getDocs(collection(db, COLLECTIONS.suppliers));
       const suppliers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      return sendJson(res, 200, { success: true, count: suppliers.length, suppliers });
+      return sendJson(res, 200, { success: true, count: suppliers.length, suppliers }, req);
     } catch (err) {
-      return sendJson(res, 500, { success: false, error: err.message });
+      return sendError(res, 500, err, req);
     }
   }
 
@@ -1627,11 +1689,11 @@ const server = http.createServer(async (req, res) => {
     req.on("data", (chunk) => { body += chunk; });
     req.on("end", async () => {
       try {
-        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" }, req);
         const payload = JSON.parse(body);
         const s = payload.supplier || payload;
         const name = String(s.name || "").trim();
-        if (!name) return sendJson(res, 400, { success: false, error: "Supplier name is required" });
+        if (!name) return sendJson(res, 400, { success: false, error: "Supplier name is required" }, req);
         const id = s.id || `sup_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
         const cleanSupplier = {
           id,
@@ -1651,9 +1713,9 @@ const server = http.createServer(async (req, res) => {
         }
 
         await setDoc(doc(db, COLLECTIONS.suppliers, id), docData);
-        return sendJson(res, 201, { success: true, supplier: cleanSupplier });
+        return sendJson(res, 201, { success: true, supplier: cleanSupplier }, req);
       } catch (err) {
-        return sendJson(res, 500, { success: false, error: err.message });
+        return sendError(res, 500, err, req);
       }
     });
     return;
@@ -1669,11 +1731,11 @@ const server = http.createServer(async (req, res) => {
           ? url.pathname.replace("/api/suppliers/", "")
           : null;
         const id = payload.id || urlId;
-        if (!id) return sendJson(res, 400, { success: false, error: "Supplier ID required" });
+        if (!id || !isValidDocumentId(id)) return sendJson(res, 400, { success: false, error: "Invalid supplier identifier format." }, req);
         await deleteDoc(doc(db, COLLECTIONS.suppliers, id));
-        return sendJson(res, 200, { success: true, message: `Supplier ${id} deleted successfully` });
+        return sendJson(res, 200, { success: true, message: `Supplier ${id} deleted successfully` }, req);
       } catch (err) {
-        return sendJson(res, 500, { success: false, error: err.message });
+        return sendError(res, 500, err, req);
       }
     });
     return;
@@ -1737,9 +1799,12 @@ const server = http.createServer(async (req, res) => {
         const pathParts = url.pathname.split("/").filter(Boolean);
         const urlId = pathParts[pathParts.length - 1];
         const id = payload.id || (urlId !== "branches" && urlId !== "update" ? urlId : null);
-        if (!id) return sendJson(res, 400, { success: false, error: "Branch ID is required" });
+        if (!id || !isValidDocumentId(id)) {
+          return sendJson(res, 400, { success: false, error: "Invalid branch identifier format." }, req);
+        }
 
-        const role = payload.role || req.headers["x-user-role"] || url.searchParams.get("role") || "";
+        const auth = getCallerAuth(req);
+        const role = (auth && auth.role) || payload.role || req.headers["x-user-role"] || url.searchParams.get("role") || "";
         let existingBranches = [];
         try {
           const snap = await getDocs(collection(db, COLLECTIONS.branches));
@@ -1754,9 +1819,9 @@ const server = http.createServer(async (req, res) => {
           if (v !== undefined) docData[k] = v;
         }
         await setDoc(doc(db, COLLECTIONS.branches, id), docData, { merge: true });
-        return sendJson(res, 200, result);
+        return sendJson(res, 200, result, req);
       } catch (err) {
-        return sendJson(res, err.statusCode || 400, { success: false, error: err.message });
+        return sendError(res, err.statusCode || 400, err, req);
       }
     });
     return;
@@ -1765,11 +1830,12 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "DELETE" && url.pathname.startsWith("/api/branches")) {
     const pathParts = url.pathname.split("/").filter(Boolean);
     const id = pathParts[pathParts.length - 1];
-    const role = req.headers["x-user-role"] || url.searchParams.get("role") || "";
-
-    if (!id || id === "branches") {
-      return sendJson(res, 400, { success: false, error: "Branch ID is required" });
+    if (!id || id === "branches" || !isValidDocumentId(id)) {
+      return sendJson(res, 400, { success: false, error: "Invalid branch identifier format." }, req);
     }
+
+    const auth = getCallerAuth(req);
+    const role = (auth && auth.role) || req.headers["x-user-role"] || url.searchParams.get("role") || "";
 
     try {
       let existingBranches = [];

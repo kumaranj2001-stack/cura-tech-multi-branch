@@ -190,9 +190,14 @@ const Patients: React.FC = () => {
                 <Label>Prescription</Label>
                 {view.prescriptionUrl.startsWith("data:image") ? (
                   <img src={view.prescriptionUrl} alt="Rx" className="max-h-60 rounded border cursor-pointer hover:opacity-90 transition" onClick={() => {
-                    const w = window.open("", "_blank");
+                    const w = window.open("", "_blank", "noopener,noreferrer");
                     if (w) {
-                      w.document.write(`<img src="${view.prescriptionUrl}" style="max-width:100%;height:auto;" />`);
+                      w.document.title = "Prescription Preview";
+                      const img = w.document.createElement("img");
+                      img.src = view.prescriptionUrl || "";
+                      img.style.maxWidth = "100%";
+                      img.style.height = "auto";
+                      w.document.body.appendChild(img);
                     }
                   }} />
                 ) : view.prescriptionUrl.startsWith("data:application/pdf") ? (
@@ -217,7 +222,7 @@ const Patients: React.FC = () => {
                               URL.revokeObjectURL(url);
                             })
                             .catch(() => {
-                              window.open(rxUrl, "_blank");
+                              window.open(rxUrl, "_blank", "noopener,noreferrer");
                             });
                         }}
                         className="text-sky-600 underline text-sm hover:text-sky-800"

@@ -4,6 +4,10 @@
  * password resets, activation toggles, and deletion.
  */
 
+import { hashPassword, verifyPassword } from "./securityMiddleware.mjs";
+
+export { hashPassword, verifyPassword };
+
 export function sanitizeUsername(raw = "") {
   return String(raw || "").trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "");
 }
@@ -120,7 +124,7 @@ export function createUser(payload = {}, existingUsers = [], callerRole = "", pl
     id,
     username,
     name,
-    password,
+    password: hashPassword(password),
     role,
     ...(branchId ? { branchId } : {}),
     active,
@@ -183,7 +187,7 @@ export function updateUser(id, patch = {}, existingUsers = [], callerRole = "") 
     ...current,
     ...(patch.name !== undefined ? { name: validation.cleaned.name } : {}),
     ...(patch.username !== undefined ? { username: newUsername } : {}),
-    ...(patch.password !== undefined ? { password: validation.cleaned.password } : {}),
+    ...(patch.password !== undefined ? { password: hashPassword(validation.cleaned.password) } : {}),
     ...(patch.role !== undefined ? { role: validation.cleaned.role } : {}),
     ...(patch.branchId !== undefined ? { branchId: patch.branchId ? String(patch.branchId).trim() : undefined } : {}),
     ...(patch.active !== undefined ? { active: Boolean(patch.active) } : {}),
