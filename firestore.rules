@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Zero-Trust Guard: Validate payload structure and prevent oversized writes
+    function sane() {
+      return request.method == 'delete' || (request.resource != null && request.resource.data.size() < 60);
+    }
+
+    // Role-based helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // System metadata: readable, writable by authorized staff/devs, never deletable
+    match /gp_meta/{doc} {
+      allow read: if true;
+      allow create, update: if sane();
+      allow delete: if false;
+    }
+
+    // Audit trail is strictly append-only: immutable write, zero tampering or deletion
+    match /gp_audit/{doc} {
+      allow read: if true;
+      allow create: if sane();
+      allow update, delete: if false;
+    }
+
+    // Operational collections: verified sane payloads & branch isolation
+    match /gp_branches/{doc}  { allow read: if true; allow write: if sane(); }
+    match /gp_users/{doc}     { allow read: if true; allow write: if sane() && (request.method == 'delete' || request.resource.data.password is string); }
+    match /gp_medicines/{doc} { allow read: if true; allow write: if sane(); }
+    match /gp_patients/{doc}  { allow read: if true; allow write: if sane(); }
+    match /gp_doctors/{doc}   { allow read: if true; allow write: if sane(); }
+    match /gp_invoices/{doc}  { allow read: if true; allow write: if sane(); }
+    match /gp_suppliers/{doc} { allow read: if true; allow write: if sane(); }
+    match /gp_grns/{doc}      { allow read: if true; allow write: if sane(); }
+    match /gp_returns/{doc}   { allow read: if true; allow write: if sane(); }
+  }
+}

@@ -1,5 +1,6 @@
 import http from "node:http";
 import os from "node:os";
+import crypto from "node:crypto";
 import { parseInvoiceDocument } from "./intelligentParser.mjs";
 import { calculateBillingTotals } from "./billingCalculator.mjs";
 import { filterMedicines } from "./inventoryFilter.mjs";
@@ -10,17 +11,61 @@ import { listUsers, createUser, updateUser, deleteUser, validateUserPayload, san
 import { createBranch, updateBranch, deleteBranch, isBranchCreatorRole } from "./branchHandler.mjs";
 import { db, COLLECTIONS, firebaseConfig } from "./firebase.mjs";
 import { collection, doc, getDoc, getDocs, setDoc, deleteDoc, writeBatch } from "firebase/firestore";
+import {
+  getOrCreateTraceId,
+  enforceRateLimit,
+  rateLimiter,
+  idempotencyManager,
+  openRouterCircuitBreaker,
+  sanitizeInput,
+  retryWithBackoff,
+  sendCompressedJson,
+  RATE_LIMIT_TIERS,
+} from "./securityMiddleware.mjs";
+import { config } from "./config.mjs";
 
 const PORT = process.env.PORT || 3001;
 
-function setCorsHeaders(res) {
+function setCorsHeaders(res, traceId = null) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, x-user-role");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-Requested-With, x-user-role, x-branch-id, Idempotency-Key, X-Idempotency-Key, X-Request-Id"
+  );
+  res.setHeader(
+    "Access-Control-Expose-Headers",
+    "X-Request-Id, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, Content-Encoding, X-Cache-Lookup"
+  );
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  if (traceId) {
+    res.setHeader("X-Request-Id", traceId);
+  }
 }
 
-function sendJson(res, statusCode, data) {
-  setCorsHeaders(res);
+function sendJson(res, statusCode, data, req = null) {
+  const effectiveReq = req || res.req || null;
+  const traceId = res.getHeader("X-Request-Id") || (effectiveReq ? getOrCreateTraceId(effectiveReq) : null);
+  setCorsHeaders(res, traceId);
+
+  // Automatic Idempotency Key caching for successful mutating operations
+  if (effectiveReq && statusCode >= 200 && statusCode < 400 && (effectiveReq.method === "POST" || effectiveReq.method === "PUT")) {
+    const idempKey = effectiveReq.headers["idempotency-key"] || effectiveReq.headers["x-idempotency-key"];
+    if (idempKey) {
+      idempotencyManager.set(idempKey, statusCode, data);
+    }
+  }
+
+  if (effectiveReq) {
+    return sendCompressedJson(effectiveReq, res, statusCode, data, {
+      "X-Request-Id": traceId || "",
+    });
+  }
+
   res.writeHead(statusCode, { "Content-Type": "application/json" });
   res.end(JSON.stringify(data));
 }
@@ -28,17 +73,23 @@ function sendJson(res, statusCode, data) {
 let currentStaffPlan = 5;
 let customStaffPlanLimits = { superadmin: 1, admin: 2, staff: 5 };
 
+// In-memory MFA challenge cache (challengeId -> { userId, code, expiresAt })
+const mfaChallenges = new Map();
+
 const server = http.createServer(async (req, res) => {
-  setCorsHeaders(res);
+  res.req = req;
+  const traceId = getOrCreateTraceId(req);
+  res.setHeader("X-Request-Id", traceId);
+  setCorsHeaders(res, traceId);
 
   const startTime = Date.now();
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
 
-  // Structured request logging
+  // Structured request logging with trace ID
   res.on("finish", () => {
     const duration = Date.now() - startTime;
     if (url.pathname !== "/api/health" || duration > 100) {
-      console.log(`[${new Date().toISOString()}] [HTTP ${res.statusCode}] ${req.method} ${url.pathname} (${duration}ms)`);
+      console.log(`[${new Date().toISOString()}] [trace:${traceId.slice(0, 8)}] [HTTP ${res.statusCode}] ${req.method} ${url.pathname} (${duration}ms)`);
     }
   });
 
@@ -49,7 +100,36 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Health check with active CPU, memory, uptime, and database monitoring
+  // Differential Rate Limiting across endpoint boundaries
+  let rateCategory = "read";
+  if (url.pathname.startsWith("/api/auth")) {
+    rateCategory = "auth";
+  } else if (url.pathname === "/api/system/purge" || url.pathname === "/api/data/purge" || url.pathname === "/api/audit/clear") {
+    rateCategory = "system";
+  } else if (req.method === "POST" || req.method === "PUT" || req.method === "DELETE" || req.method === "PATCH") {
+    rateCategory = "write";
+  } else {
+    rateCategory = "read";
+  }
+
+  // Exempt health checks so load balancers & monitoring probes are never throttled
+  if (url.pathname !== "/api/health" && url.pathname !== "/") {
+    if (!enforceRateLimit(req, res, rateCategory)) {
+      return;
+    }
+  }
+
+  // Idempotent execution: if Idempotency-Key is provided on mutating request, return cached response
+  const idempotencyKey = req.headers["idempotency-key"] || req.headers["x-idempotency-key"];
+  if (idempotencyKey && (req.method === "POST" || req.method === "PUT")) {
+    const cached = idempotencyManager.get(idempotencyKey);
+    if (cached) {
+      res.setHeader("X-Cache-Lookup", "HIT-IDEMPOTENT");
+      return sendJson(res, cached.statusCode, cached.data, req);
+    }
+  }
+
+  // Health check with active CPU, memory, uptime, database monitoring, and security observability
   if (req.method === "GET" && (url.pathname === "/api/health" || url.pathname === "/")) {
     const mem = process.memoryUsage();
     const totalMem = os.totalmem();
@@ -59,6 +139,7 @@ const server = http.createServer(async (req, res) => {
       status: "ok",
       service: "Guru Pharma GRN Document Parsing Backend",
       version: "1.0.0",
+      traceId,
       process: {
         pid: process.pid,
         uptimeSeconds: Math.round(process.uptime()),
@@ -83,6 +164,19 @@ const server = http.createServer(async (req, res) => {
         userMicroseconds: cpuUsage.user,
         systemMicroseconds: cpuUsage.system,
       },
+      security: {
+        rateLimiter: {
+          activeBuckets: rateLimiter.buckets.size,
+          tiers: RATE_LIMIT_TIERS,
+        },
+        idempotency: {
+          cachedEntries: idempotencyManager.cache.size,
+          ttlMs: idempotencyManager.ttlMs,
+        },
+        circuitBreakers: {
+          openRouter: openRouterCircuitBreaker.getStatus(),
+        },
+      },
       firebase: {
         projectId: firebaseConfig.projectId,
         authDomain: firebaseConfig.authDomain,
@@ -90,10 +184,10 @@ const server = http.createServer(async (req, res) => {
         status: "connected",
       },
       timestamp: new Date().toISOString(),
-    });
+    }, req);
   }
 
-  // Active Metrics endpoint
+  // Active Metrics endpoint with security & resilience tracking
   if (req.method === "GET" && url.pathname === "/api/metrics") {
     const mem = process.memoryUsage();
     const totalMem = os.totalmem();
@@ -101,6 +195,7 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, {
       success: true,
       timestamp: new Date().toISOString(),
+      traceId,
       uptimeSeconds: Math.round(process.uptime()),
       pid: process.pid,
       cpuCores: os.cpus().length,
@@ -113,7 +208,14 @@ const server = http.createServer(async (req, res) => {
         systemTotalBytes: totalMem,
       },
       inMemoryMedicinesCount: getInMemoryMedicines ? getInMemoryMedicines().length : 0,
-    });
+      security: {
+        activeRateLimitBuckets: rateLimiter.buckets.size,
+        activeIdempotencyKeys: idempotencyManager.cache.size,
+        circuitBreakers: {
+          openRouter: openRouterCircuitBreaker.getStatus(),
+        },
+      },
+    }, req);
   }
 
   // Live Firebase connection status
@@ -180,13 +282,77 @@ const server = http.createServer(async (req, res) => {
           apiKey,
         });
 
-        return sendJson(res, 200, result);
+        return sendJson(res, 200, result, req);
       } catch (err) {
         console.error("[Backend Server Error]", err);
         return sendJson(res, 500, {
           success: false,
           error: err.message || "Failed to process document",
+        }, req);
+      }
+    });
+    return;
+  }
+
+  // Secure AI Chat & Completion Proxy Endpoint (never expose API keys on client)
+  if (req.method === "POST" && url.pathname === "/api/ai/chat") {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 5 * 1024 * 1024) req.destroy();
+    });
+
+    req.on("end", async () => {
+      try {
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" }, req);
+        const payload = sanitizeInput(JSON.parse(body));
+        const {
+          model = "google/gemini-2.5-flash",
+          messages = [],
+          max_tokens = 4000,
+          temperature = 0.1,
+          apiKey: clientApiKey,
+        } = payload;
+
+        const effectiveKey = clientApiKey || config.openRouter.apiKey;
+        if (!effectiveKey) {
+          return sendJson(res, 503, {
+            success: false,
+            error: "Backend AI proxy not configured with OPENROUTER_API_KEY",
+          }, req);
+        }
+
+        const result = await openRouterCircuitBreaker.execute(async () => {
+          return retryWithBackoff(async () => {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 45000);
+            try {
+              const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                signal: controller.signal,
+                headers: {
+                  Authorization: `Bearer ${effectiveKey}`,
+                  "Content-Type": "application/json",
+                  "HTTP-Referer": "https://gurupharma.local",
+                  "X-Title": "Guru Pharma AI Proxy",
+                },
+                body: JSON.stringify({ model, messages, max_tokens, temperature }),
+              });
+              if (!resp.ok) {
+                const t = await resp.text();
+                throw new Error(`OpenRouter (${resp.status}): ${t}`);
+              }
+              return await resp.json();
+            } finally {
+              clearTimeout(timeout);
+            }
+          }, 3, 500);
         });
+
+        return sendJson(res, 200, { success: true, ...result }, req);
+      } catch (err) {
+        console.error("[AI Proxy Error]", err.message);
+        return sendJson(res, 500, { success: false, error: err.message }, req);
       }
     });
     return;
@@ -990,17 +1156,85 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Multi-Factor Authentication: Challenge Generation Endpoint
+  if (req.method === "POST" && url.pathname === "/api/auth/mfa/challenge") {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", async () => {
+      try {
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" }, req);
+        const { userId = "", username = "" } = sanitizeInput(JSON.parse(body));
+        if (!userId && !username) {
+          return sendJson(res, 400, { success: false, error: "userId or username required" }, req);
+        }
+        const challengeId = crypto.randomUUID();
+        const code = String(Math.floor(100000 + Math.random() * 900000));
+        mfaChallenges.set(challengeId, {
+          userId: userId || username,
+          code,
+          expiresAt: Date.now() + 5 * 60 * 1000,
+        });
+        return sendJson(res, 200, {
+          success: true,
+          challengeId,
+          expiresInSeconds: 300,
+          message: "MFA 6-digit challenge code generated successfully",
+          hint: process.env.NODE_ENV === "production" ? undefined : `Demo verification code: ${code}`,
+        }, req);
+      } catch (err) {
+        return sendJson(res, 500, { success: false, error: err.message }, req);
+      }
+    });
+    return;
+  }
+
+  // Multi-Factor Authentication: Verification Endpoint
+  if (req.method === "POST" && url.pathname === "/api/auth/mfa/verify") {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", async () => {
+      try {
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" }, req);
+        const { challengeId, code } = sanitizeInput(JSON.parse(body));
+        if (!challengeId || !code) {
+          return sendJson(res, 400, { success: false, error: "challengeId and code are required" }, req);
+        }
+        const entry = mfaChallenges.get(challengeId);
+        if (!entry || Date.now() > entry.expiresAt) {
+          return sendJson(res, 400, { success: false, error: "MFA challenge expired or invalid" }, req);
+        }
+        if (entry.code !== String(code).trim()) {
+          return sendJson(res, 401, { success: false, error: "Invalid verification code" }, req);
+        }
+        mfaChallenges.delete(challengeId);
+        const mfaSessionToken = `mfa_sec_${crypto.randomUUID()}`;
+        return sendJson(res, 200, {
+          success: true,
+          verified: true,
+          mfaSessionToken,
+          claims: {
+            mfaVerified: true,
+            verifiedAt: new Date().toISOString(),
+          },
+        }, req);
+      } catch (err) {
+        return sendJson(res, 500, { success: false, error: err.message }, req);
+      }
+    });
+    return;
+  }
+
   // User Authentication Verification Endpoint
   if (req.method === "POST" && (url.pathname === "/api/auth/verify" || url.pathname === "/api/auth/login")) {
     let body = "";
     req.on("data", (chunk) => { body += chunk; });
     req.on("end", async () => {
       try {
-        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
-        const { username = "", password = "" } = JSON.parse(body);
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" }, req);
+        const { username = "", password = "", mfaCode, challengeId } = sanitizeInput(JSON.parse(body));
         const cleanUser = String(username).trim().toLowerCase();
         if (!cleanUser || !password) {
-          return sendJson(res, 400, { success: false, error: "Username and password required" });
+          return sendJson(res, 400, { success: false, error: "Username and password required" }, req);
         }
         const snap = await getDocs(collection(db, COLLECTIONS.users));
         const matched = snap.docs
@@ -1008,23 +1242,58 @@ const server = http.createServer(async (req, res) => {
           .find((u) => String(u.username).trim().toLowerCase() === cleanUser);
 
         if (!matched) {
-          return sendJson(res, 401, { success: false, error: "User not found" });
+          return sendJson(res, 401, { success: false, error: "User not found" }, req);
         }
         if (!matched.active) {
-          return sendJson(res, 403, { success: false, error: "Account is deactivated. Contact admin." });
+          return sendJson(res, 403, { success: false, error: "Account is deactivated. Contact admin." }, req);
         }
         if (matched.password !== password) {
-          return sendJson(res, 401, { success: false, error: "Incorrect password" });
+          return sendJson(res, 401, { success: false, error: "Incorrect password" }, req);
+        }
+
+        // Check if MFA is required on user account
+        if (matched.mfaEnabled) {
+          if (!challengeId || !mfaCode) {
+            const newChallengeId = crypto.randomUUID();
+            const generatedCode = String(Math.floor(100000 + Math.random() * 900000));
+            mfaChallenges.set(newChallengeId, {
+              userId: matched.id,
+              code: generatedCode,
+              expiresAt: Date.now() + 5 * 60 * 1000,
+            });
+            return sendJson(res, 200, {
+              success: true,
+              mfaRequired: true,
+              challengeId: newChallengeId,
+              userId: matched.id,
+              message: "MFA challenge required. Please verify code.",
+              hint: process.env.NODE_ENV === "production" ? undefined : `Demo verification code: ${generatedCode}`,
+            }, req);
+          }
+
+          const challenge = mfaChallenges.get(challengeId);
+          if (!challenge || Date.now() > challenge.expiresAt || challenge.code !== String(mfaCode).trim()) {
+            return sendJson(res, 401, { success: false, error: "Invalid or expired MFA code" }, req);
+          }
+          mfaChallenges.delete(challengeId);
         }
 
         const safeUser = sanitizeUserOutput(matched);
+        const sessionToken = `tok_${crypto.randomUUID()}`;
         return sendJson(res, 200, {
           success: true,
           message: "Authentication successful",
+          token: sessionToken,
+          claims: {
+            role: safeUser.role,
+            branchId: safeUser.branchId || "br_main",
+            mfaVerified: Boolean(matched.mfaEnabled),
+            authTime: new Date().toISOString(),
+          },
           user: safeUser,
-        });
+        }, req);
       } catch (err) {
-        return sendJson(res, 500, { success: false, error: err.message });
+        return sendJson(res, 500, { success: false, error: err.message }, req);
       }
     });
     return;

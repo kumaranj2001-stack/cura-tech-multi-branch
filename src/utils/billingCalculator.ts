@@ -28,7 +28,7 @@ export function calculateBillingTotals(
   let subtotal = 0;
   const safeItems = Array.isArray(items) ? items : [];
   const processedItems = safeItems.map((it) => {
-    const unitPrice = Math.max(0, Number(it.price) || 0);
+    const unitPrice = Math.max(0, Number(it.price ?? (it as any).mrp) || 0);
     const qty = Math.max(0, Number(it.qty) || 0);
     const lineTotal = round2(unitPrice * qty);
     subtotal += lineTotal;

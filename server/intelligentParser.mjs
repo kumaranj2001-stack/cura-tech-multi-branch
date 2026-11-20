@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import { config } from "./config.mjs";
+import { openRouterCircuitBreaker, retryWithBackoff } from "./securityMiddleware.mjs";
 
 export const PRIMARY_MODEL = "google/gemini-2.5-flash";
 export const FALLBACK_MODEL = "openai/gpt-4o-mini";
@@ -381,46 +382,62 @@ Correctly map all column headers and data fields for:
     }
   }
 
-  // Helper to query OpenRouter
+  // Helper to query OpenRouter protected with Circuit Breaker and Exponential Backoff Retries
   async function callOpenRouter(selectedModel) {
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${effectiveKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://gurupharma.local",
-        "X-Title": "Guru Pharma GRN Intelligent Parser",
-      },
-      body: JSON.stringify({
-        model: selectedModel,
-        max_tokens: 4000,
-        temperature: 0.1,
-        messages: [
-          { role: "system", content: buildSystemPrompt() },
-          { role: "user", content: userMessageContent },
-        ],
-      }),
+    return openRouterCircuitBreaker.execute(async () => {
+      return retryWithBackoff(async (attempt) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 45000);
+        try {
+          const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            signal: controller.signal,
+            headers: {
+              Authorization: `Bearer ${effectiveKey}`,
+              "Content-Type": "application/json",
+              "HTTP-Referer": "https://gurupharma.local",
+              "X-Title": "Guru Pharma GRN Intelligent Parser",
+            },
+            body: JSON.stringify({
+              model: selectedModel,
+              max_tokens: 4000,
+              temperature: 0.1,
+              messages: [
+                { role: "system", content: buildSystemPrompt() },
+                { role: "user", content: userMessageContent },
+              ],
+            }),
+          });
+
+          if (!res.ok) {
+            const errText = await res.text();
+            let errMsg = `OpenRouter API error (status ${res.status})`;
+            try {
+              const errJson = JSON.parse(errText);
+              errMsg = errJson.error?.message || errMsg;
+            } catch {
+              errMsg = `${errMsg}: ${errText.slice(0, 150)}`;
+            }
+            if (res.status === 429 || res.status >= 500) {
+              const retryErr = new Error(errMsg);
+              retryErr.status = res.status;
+              throw retryErr;
+            }
+            throw new Error(errMsg);
+          }
+
+          const data = await res.json();
+          const content = data.choices?.[0]?.message?.content;
+          if (!content) {
+            throw new Error("No response content received from multimodal LLM.");
+          }
+
+          return { content, modelUsed: data.model || selectedModel };
+        } finally {
+          clearTimeout(timeout);
+        }
+      }, 3, 500);
     });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      let errMsg = `OpenRouter API error (status ${res.status})`;
-      try {
-        const errJson = JSON.parse(errText);
-        errMsg = errJson.error?.message || errMsg;
-      } catch {
-        errMsg = `${errMsg}: ${errText.slice(0, 150)}`;
-      }
-      throw new Error(errMsg);
-    }
-
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new Error("No response content received from multimodal LLM.");
-    }
-
-    return { content, modelUsed: data.model || selectedModel };
   }
 
   let rawResult;

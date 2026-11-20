@@ -249,6 +249,40 @@ Output STRICTLY valid JSON:
   onStatusChange?.("Querying multimodal LLM (Gemini 2.5 Flash via OpenRouter)...");
 
   async function queryModel(modelName: string) {
+    // 1. Try secure backend AI proxy endpoint without exposing keys in client code
+    try {
+      const proxyRes = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: modelName,
+          max_tokens: 4000,
+          temperature: 0.1,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userContent },
+          ],
+          apiKey: apiKey || undefined,
+        }),
+      });
+      if (proxyRes.ok) {
+        const json = await proxyRes.json();
+        if (json.choices?.[0]?.message?.content) {
+          return {
+            content: json.choices[0].message.content,
+            modelUsed: json.model || modelName,
+          };
+        }
+      }
+    } catch (proxyErr) {
+      console.warn("Backend AI proxy unavailable, trying fallback:", proxyErr);
+    }
+
+    // 2. Direct browser fallback only if explicit apiKey was supplied
+    if (!apiKey) {
+      throw new Error("Backend AI service is currently unavailable. Please verify backend server status.");
+    }
+
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
