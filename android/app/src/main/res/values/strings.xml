@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">CuraTech</string>
-    <string name="title_activity_main">CuraTech</string>
-    <string name="package_name">com.curatech.pharmacy</string>
-    <string name="custom_url_scheme">com.curatech.pharmacy</string>
-</resources>
