@@ -70,6 +70,8 @@ const Layout: React.FC<{ page: PageId; setPage: (p: PageId) => void; children: R
     if (!flags.grnModule && (n.id === "purchases" || n.id === "grn" || n.id === "approvedGrn")) return false;
     // hide Audit Log when logging is disabled
     if (!flags.auditEnabled && n.id === "audit") return false;
+    // hide Branches when developer toggle branchesVisible is turned off
+    if (n.id === "branches" && flags.branchesVisible === false) return false;
     if (n.id === "branches" && !multiBranch && currentUser?.role !== "developer") return false;
     // Privacy policy option in menu is accessible purely to Developer (non-developers see it embedded in Settings)
     if (n.id === "privacy" && currentUser?.role !== "developer") return false;
@@ -178,7 +180,7 @@ const Layout: React.FC<{ page: PageId; setPage: (p: PageId) => void; children: R
                       <Network className="w-3.5 h-3.5" />
                       {currentUser?.role === "developer" ? "Developer" : "Super Admin"}
                     </span>
-                    {multiBranch && (
+                    {multiBranch && flags.branchesVisible !== false && (
                     <label className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-900/30 pl-2.5 pr-1 py-0.5 text-sky-700 dark:text-sky-300 font-medium">
                       <span className="whitespace-nowrap">{viewBranchId ? "Viewing" : "All Branches"}</span>
                       <select

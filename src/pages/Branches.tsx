@@ -7,7 +7,7 @@ import { flashToast } from "../utils/helpers";
 import { Building2, Plus, ShieldCheck } from "lucide-react";
 
 const Branches: React.FC = () => {
-  const { data, setData, currentUser, log } = useStore();
+  const { data, setData, currentUser, log, flags } = useStore();
   const isDeveloper = currentUser?.role === "developer";
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<Branch | null>(null);
@@ -22,14 +22,20 @@ const Branches: React.FC = () => {
     active: true,
   });
 
-  if (!isOverseer(currentUser?.role)) {
+  if (!isOverseer(currentUser?.role) || flags.branchesVisible === false) {
     return (
       <Card>
         <CardBody className="text-center text-slate-500 dark:text-slate-400 py-12">
           <div className="flex flex-col items-center justify-center gap-2">
             <span className="text-3xl">⛔</span>
-            <div className="font-semibold text-slate-700 dark:text-slate-200">Developer or Super Admin access required</div>
-            <p className="text-xs text-slate-400">Branch settings are only viewable by administrative overseers.</p>
+            <div className="font-semibold text-slate-700 dark:text-slate-200">
+              {flags.branchesVisible === false ? "Branch Management Disabled" : "Developer or Super Admin access required"}
+            </div>
+            <p className="text-xs text-slate-400">
+              {flags.branchesVisible === false
+                ? "The branches option is disabled in Feature Controls."
+                : "Branch settings are only viewable by administrative overseers."}
+            </p>
           </div>
         </CardBody>
       </Card>

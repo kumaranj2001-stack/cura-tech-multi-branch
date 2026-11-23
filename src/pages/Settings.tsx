@@ -160,6 +160,17 @@ const FLAG_GROUPS: {
     ],
   },
   {
+    title: "Branch Management",
+    icon: Building2,
+    items: [
+      {
+        key: "branchesVisible",
+        label: "Branches Option (Developer View)",
+        hint: "When enabled, the 'Branches' option is visible in the developer view. When disabled, the 'Branches' option is completely hidden.",
+      },
+    ],
+  },
+  {
     title: "Inventory Control",
     icon: Sliders,
     note: "Restricted to Developer and Admin roles.",

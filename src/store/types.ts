@@ -313,6 +313,7 @@ export interface FeatureFlags {
   minStockFeature: boolean;
   supplierSelfRegistration?: boolean;
   doctorAddAdminAllowed?: boolean;
+  branchesVisible?: boolean;
 }
 
 /* ── Developer-controlled staff / account plans (mutually exclusive) ──── */
@@ -452,6 +453,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   minStockFeature: true,
   supplierSelfRegistration: false,
   doctorAddAdminAllowed: false,
+  branchesVisible: true,
 };
 
 export const getAuditRetentionDays = (flags: FeatureFlags): number | null => {

@@ -611,7 +611,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Super Admin branch switcher: null = all branches, otherwise focused branch id
   const [viewBranchId, setViewBranchId] = useState<string | null>(null);
   // Developer-controlled feature flags — synced through the meta doc
-  const [flags, setFlags] = useState<FeatureFlags>(DEFAULT_FEATURE_FLAGS);
+  const [flags, setFlags] = useState<FeatureFlags>(() => {
+    try {
+      const saved = localStorage.getItem("gp_feature_flags");
+      if (saved) return { ...DEFAULT_FEATURE_FLAGS, ...JSON.parse(saved) };
+    } catch {}
+    return DEFAULT_FEATURE_FLAGS;
+  });
   const [staffPlan, setStaffPlanState] = useState<StaffPlanTier>(() => {
     try {
       const saved = Number(localStorage.getItem("gp_staff_plan"));
@@ -632,6 +638,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const setFlagsBatch = useCallback((patch: Partial<FeatureFlags>) => {
     setFlags((prev) => {
       const next = { ...prev, ...patch };
+      try {
+        localStorage.setItem("gp_feature_flags", JSON.stringify(next));
+      } catch {}
       if (db) {
         setDoc(doc(db, COLLECTIONS.meta, "app"), { featureFlags: next }, { merge: true }).catch(() => {});
       }
@@ -655,6 +664,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const setFlag = useCallback((key: keyof FeatureFlags, value: boolean) => {
     setFlags((prev) => {
       const next = { ...prev, [key]: value };
+      try {
+        localStorage.setItem("gp_feature_flags", JSON.stringify(next));
+      } catch {}
       if (db) {
         setDoc(doc(db, COLLECTIONS.meta, "app"), { featureFlags: next }, { merge: true }).catch(() => {});
       }
@@ -1304,7 +1316,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             returnsClearedAt: (mdata?.returnsClearedAt as string) || null,
           };
           const ff = snapshot.data().featureFlags as Partial<FeatureFlags> | undefined;
-          if (ff) setFlags({ ...DEFAULT_FEATURE_FLAGS, ...ff });
+          if (ff) {
+            const nextFlags = { ...DEFAULT_FEATURE_FLAGS, ...ff };
+            setFlags(nextFlags);
+            try {
+              localStorage.setItem("gp_feature_flags", JSON.stringify(nextFlags));
+            } catch {}
+          }
           if (snapshot.data().staffPlan !== undefined) {
             const cloudPlan = snapshot.data().staffPlan;
             const nextPlan: StaffPlanTier = 5;
