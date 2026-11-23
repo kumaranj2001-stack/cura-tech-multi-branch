@@ -1,14 +1,14 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState } from "react";
 import { useStore } from "../store/store";
 import { useTheme } from "../store/theme";
-import { Card, CardBody, Button, Label, Input, Textarea, Select, Modal } from "../components/ui";
+import { Card, CardBody, Button, Label, Input, Select, Modal, Textarea } from "../components/ui";
 import { downloadJSON, flashToast, compressImageFile } from "../utils/helpers";
 import type { FeatureFlags, StaffPlanLimits } from "../store/types";
-import { isOverseer, STAFF_PLAN_OPTIONS, formatPlanCap, staffPlanLimits, DEFAULT_CUSTOM_STAFF_LIMITS, planAllowsMultiBranch } from "../store/types";
+import { isOverseer, STAFF_PLAN_OPTIONS, formatPlanCap, staffPlanLimits, DEFAULT_CUSTOM_STAFF_LIMITS } from "../store/types";
 import { parseBranchBackup } from "../store/store";
 import { firebaseConfig } from "../config/firebaseConfig";
 import Privacy from "./Privacy";
-import { FileDown, Upload, Package, Filter, BarChart3, LayoutDashboard, QrCode, Loader2, ShieldCheck, CreditCard, AlertTriangle, Clock, Sliders, Trash2, Shield, Building2, Stethoscope } from "lucide-react";
+import { FileDown, Upload, Package, Filter, BarChart3, LayoutDashboard, QrCode, Loader2, ShieldCheck, CreditCard, AlertTriangle, Clock, Sliders, Trash2, Shield, Building2, Stethoscope, Save } from "lucide-react";
 
 const Toggle: React.FC<{ on: boolean; onChange: (v: boolean) => void; label: string; hint?: string; disabled?: boolean }> = ({ on, onChange, label, hint, disabled }) => (
   <button
@@ -149,17 +149,6 @@ const FLAG_GROUPS: {
     ],
   },
   {
-    title: "Branch Management",
-    icon: Building2,
-    items: [
-      {
-        key: "branchesVisible",
-        label: "Branches Option (Developer View)",
-        hint: "When enabled, the Branches option is visible in the developer view. When disabled, it is completely hidden.",
-      },
-    ],
-  },
-  {
     title: "Suppliers & Self-Registration",
     icon: Building2,
     items: [
@@ -266,6 +255,17 @@ const FLAG_GROUPS: {
     title: "GRN Entry",
     icon: Package,
     items: [{ key: "grnAutoFill", label: "Auto-fill from supplier invoice", hint: "PDF / Excel import & auto population" }],
+  },
+  {
+    title: "Branch Management",
+    icon: Building2,
+    items: [
+      {
+        key: "branchModule",
+        label: "Branches Option",
+        hint: "When enabled, 'Branches' is visible in the developer view. When disabled, 'Branches' is completely hidden.",
+      },
+    ],
   },
   {
     title: "Reports",
@@ -394,7 +394,6 @@ service cloud.firestore {
 
 const Settings: React.FC = () => {
   const { data, setData, currentUser, log, cloudReady, cloudSyncing, cloudError, flags, setFlag, setFlagsBatch, staffPlan, setStaffPlan, customStaffPlanLimits, payment, branchPayments, setBranchPayment, branchProfiles, setBranchProfile, buildBranchBackup, restoreBranchBackup, purgeAllBusinessData } = useStore();
-  const multiBranch = planAllowsMultiBranch(staffPlan, customStaffPlanLimits);
   const isSuperAdmin = currentUser?.role === "superadmin";
   const isAdmin = currentUser?.role === "admin";
   const isDeveloper = isOverseer(currentUser?.role);
@@ -402,98 +401,87 @@ const Settings: React.FC = () => {
   const isStaff = currentUser?.role === "staff";
   const canViewPayments = isAdmin || isSuperAdmin;
 
-  const targetMainBranch = data.branches[0];
-  const targetMainBranchId = targetMainBranch?.id || "br_main";
-  const activeProfile = branchProfiles[targetMainBranchId] || {};
+  // Store Profile Management (when multi-branch is disabled)
+  // Restricted exclusively to Super Admin (and Developer). Standard Admins have modification access completely removed.
+  const primaryBranch = data.branches[0];
+  const targetBranchId = primaryBranch?.id || "br_main";
+  const branchProfile = branchProfiles[targetBranchId];
 
-  const [storeProfileForm, setStoreProfileForm] = useState({
-    name: activeProfile.name || targetMainBranch?.storeName || targetMainBranch?.name || "",
-    gstNumber: activeProfile.gstNumber || targetMainBranch?.gstNumber || "",
-    address: activeProfile.address || targetMainBranch?.address || "",
-    contact: activeProfile.contact || targetMainBranch?.phone || "",
-    email: activeProfile.email || targetMainBranch?.email || "",
-  });
-  const [savingStoreProfile, setSavingStoreProfile] = useState(false);
+  const [profileStoreName, setProfileStoreName] = useState(primaryBranch?.storeName || primaryBranch?.name || branchProfile?.name || "");
+  const [profileGstNumber, setProfileGstNumber] = useState(primaryBranch?.gstNumber || branchProfile?.gstNumber || "");
+  const [profilePhone, setProfilePhone] = useState(primaryBranch?.phone || branchProfile?.phone || branchProfile?.contact || "");
+  const [profileEmail, setProfileEmail] = useState(primaryBranch?.email || branchProfile?.email || "");
+  const [profileAddress, setProfileAddress] = useState(primaryBranch?.address || branchProfile?.address || "");
+  const [savingProfile, setSavingProfile] = useState(false);
 
-  useEffect(() => {
-    const prof = branchProfiles[targetMainBranchId];
-    if (prof) {
-      setStoreProfileForm({
-        name: prof.name || targetMainBranch?.storeName || targetMainBranch?.name || "",
-        gstNumber: prof.gstNumber || targetMainBranch?.gstNumber || "",
-        address: prof.address || targetMainBranch?.address || "",
-        contact: prof.contact || targetMainBranch?.phone || "",
-        email: prof.email || targetMainBranch?.email || "",
-      });
-    } else if (targetMainBranch) {
-      setStoreProfileForm((prev) => ({
-        name: prev.name || targetMainBranch.storeName || targetMainBranch.name || "",
-        gstNumber: prev.gstNumber || targetMainBranch.gstNumber || "",
-        address: prev.address || targetMainBranch.address || "",
-        contact: prev.contact || targetMainBranch.phone || "",
-        email: prev.email || targetMainBranch.email || "",
-      }));
+  React.useEffect(() => {
+    if (primaryBranch) {
+      setProfileStoreName(primaryBranch.storeName || primaryBranch.name || branchProfile?.name || "");
+      setProfileGstNumber(primaryBranch.gstNumber || branchProfile?.gstNumber || "");
+      setProfilePhone(primaryBranch.phone || branchProfile?.phone || branchProfile?.contact || "");
+      setProfileEmail(primaryBranch.email || branchProfile?.email || "");
+      setProfileAddress(primaryBranch.address || branchProfile?.address || "");
     }
-  }, [branchProfiles, targetMainBranchId, targetMainBranch]);
+  }, [primaryBranch?.id, primaryBranch?.storeName, primaryBranch?.name, primaryBranch?.gstNumber, primaryBranch?.phone, primaryBranch?.email, primaryBranch?.address, branchProfile]);
 
-  const handleSaveStoreProfile = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleSaveStoreProfile = async () => {
     if (!isSuperAdmin && !isDevAccount) {
-      flashToast("Access Denied: Only Super Admin can modify store profile details.", "err");
+      flashToast("Access Denied: Only Super Admin can modify store profile details", "err");
       return;
     }
-    setSavingStoreProfile(true);
+    const trimmedStoreName = profileStoreName.trim();
+    if (!trimmedStoreName) {
+      alert("Business / Pharmacy Name is required");
+      return;
+    }
+    setSavingProfile(true);
+    const patch = {
+      storeName: trimmedStoreName,
+      gstNumber: profileGstNumber.trim().toUpperCase(),
+      phone: profilePhone.trim(),
+      email: profileEmail.trim(),
+      address: profileAddress.trim(),
+    };
+
+    // Update branches data in store
+    setData((d) => ({
+      ...d,
+      branches: d.branches.map((b) =>
+        b.id === targetBranchId ? { ...b, ...patch } : b
+      ),
+    }));
+
+    // Update branchProfile in store
+    setBranchProfile(targetBranchId, {
+      name: trimmedStoreName,
+      storeName: trimmedStoreName,
+      gstNumber: patch.gstNumber,
+      phone: patch.phone,
+      contact: patch.phone,
+      email: patch.email,
+      address: patch.address,
+    });
+
+    // Update backend API
     try {
-      const payload = {
-        branchId: targetMainBranchId,
-        name: storeProfileForm.name.trim(),
-        gstNumber: storeProfileForm.gstNumber.trim().toUpperCase(),
-        address: storeProfileForm.address.trim(),
-        contact: storeProfileForm.contact.trim(),
-        email: storeProfileForm.email.trim().toLowerCase(),
-        role: currentUser?.role,
-      };
-
-      setBranchProfile(targetMainBranchId, {
-        name: payload.name,
-        gstNumber: payload.gstNumber,
-        address: payload.address,
-        contact: payload.contact,
-        email: payload.email,
-      });
-
-      setData((d) => ({
-        ...d,
-        branches: d.branches.map((b) =>
-          b.id === targetMainBranchId
-            ? {
-                ...b,
-                storeName: payload.name,
-                gstNumber: payload.gstNumber,
-                address: payload.address,
-                phone: payload.contact,
-                email: payload.email,
-              }
-            : b
-        ),
-      }));
-
-      await fetch("/api/store-profile", {
-        method: "POST",
+      await fetch(`/api/branches/${targetBranchId}`, {
+        method: "PUT",
         headers: {
           "Content-Type": "application/json",
           "x-user-role": currentUser?.role || "",
         },
-        body: JSON.stringify(payload),
-      }).catch((err) => console.warn("[StoreProfile backend save warning]", err));
-
-      log("STORE_PROFILE_UPDATE", `Store profile updated for ${targetMainBranch?.name || targetMainBranchId}`);
-      flashToast("Store profile saved successfully! Updated details will appear on invoices.", "ok");
-    } catch (err: any) {
-      flashToast(err?.message || "Failed to save store profile", "err");
-    } finally {
-      setSavingStoreProfile(false);
+        body: JSON.stringify({
+          patch,
+          role: currentUser?.role,
+        }),
+      });
+    } catch (e) {
+      console.warn("[Backend store profile update warning]", e);
     }
+
+    log("STORE_PROFILE_UPDATE", trimmedStoreName);
+    flashToast("Store profile updated successfully", "ok");
+    setSavingProfile(false);
   };
 
   // Option 5 - Fully Customizable Account Plan state
@@ -702,94 +690,109 @@ const Settings: React.FC = () => {
         </CardBody>
       </Card>
 
-      {/* Store Profile — Exclusively for Super Admin when Multi-Branch is disabled */}
-      {!multiBranch && (isSuperAdmin || isDevAccount) && (
+      {/* Store Profile — Only visible when multi-branch management is disabled */}
+      {!flags.branchModule && (
         <Card>
           <CardBody className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-700/60 pb-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
               <div>
-                <div className="font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                  🏪 Store Profile Configuration
+                <div className="font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2 text-base">
+                  <Building2 className="w-5 h-5 text-sky-600 dark:text-sky-400" />
+                  Store Profile
                 </div>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                  Configure official pharmacy details printed on sales invoices and receipts.
+                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                  Official pharmacy details printed on tax invoices, receipts, and customer documents.
                 </p>
               </div>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/30 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300 shrink-0 self-start sm:self-auto">
-                Super Admin exclusive
-              </span>
+              {isSuperAdmin || isDevAccount ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/30 px-3 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300 shrink-0 self-start sm:self-auto">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  Super Admin Managed
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/30 px-3 py-1 text-xs font-semibold text-amber-700 dark:text-amber-300 shrink-0 self-start sm:self-auto">
+                  🔒 Read-Only (Restricted to Super Admin)
+                </span>
+              )}
             </div>
 
-            <form onSubmit={handleSaveStoreProfile} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <Label>Business / Pharmacy Name *</Label>
-                  <Input
-                    value={storeProfileForm.name}
-                    onChange={(e) => setStoreProfileForm({ ...storeProfileForm, name: e.target.value })}
-                    placeholder="e.g. Guru Pharmacy"
-                    required
-                    disabled={savingStoreProfile}
-                  />
-                  <p className="text-[11px] text-slate-400 mt-1">Header name on tax invoices and receipts</p>
-                </div>
-                <div>
-                  <Label>GST Number (GSTIN)</Label>
-                  <Input
-                    value={storeProfileForm.gstNumber}
-                    onChange={(e) => setStoreProfileForm({ ...storeProfileForm, gstNumber: e.target.value.toUpperCase() })}
-                    placeholder="e.g. 33AAAAA0000A1Z5"
-                    className="uppercase font-mono"
-                    maxLength={20}
-                    disabled={savingStoreProfile}
-                  />
-                  <p className="text-[11px] text-slate-400 mt-1">Official GSTIN printed on tax invoices</p>
-                </div>
-                <div className="sm:col-span-2">
-                  <Label>Official Registered Address</Label>
-                  <Textarea
-                    value={storeProfileForm.address}
-                    onChange={(e) => setStoreProfileForm({ ...storeProfileForm, address: e.target.value })}
-                    placeholder="Full registered address (Street, Area, City, State, PIN)"
-                    rows={3}
-                    disabled={savingStoreProfile}
-                  />
-                  <p className="text-[11px] text-slate-400 mt-1">Multi-line address formatting is preserved on invoices and printed slips</p>
-                </div>
-                <div>
-                  <Label>Official Phone Number</Label>
-                  <Input
-                    value={storeProfileForm.contact}
-                    onChange={(e) => setStoreProfileForm({ ...storeProfileForm, contact: e.target.value })}
-                    placeholder="e.g. +91 98765 43210"
-                    disabled={savingStoreProfile}
-                  />
-                </div>
-                <div>
-                  <Label>Official Email Address</Label>
-                  <Input
-                    type="email"
-                    value={storeProfileForm.email}
-                    onChange={(e) => setStoreProfileForm({ ...storeProfileForm, email: e.target.value })}
-                    placeholder="e.g. contact@gurupharmacy.com"
-                    disabled={savingStoreProfile}
-                  />
+            {/* If standard Admin, inform them that modifications are restricted exclusively to Super Admin */}
+            {!isSuperAdmin && !isDevAccount && (
+              <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/30 p-3.5 flex items-start gap-3">
+                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
+                  <span className="font-bold">Access Restricted:</span> Store profile modification is restricted exclusively to Super Admin accounts. Standard Admin permissions cannot modify business credentials, GSTIN, or official contact records.
                 </div>
               </div>
+            )}
 
-              <div className="flex flex-col sm:flex-row justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-700/60">
-                <Button type="submit" disabled={savingStoreProfile} className="w-full sm:w-auto flex items-center justify-center gap-1.5">
-                  {savingStoreProfile ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Saving Store Profile...</span>
-                    </>
-                  ) : (
-                    <span>Save Store Profile</span>
-                  )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <Label>Business / Pharmacy Name *</Label>
+                <Input
+                  value={profileStoreName}
+                  onChange={(e) => setProfileStoreName(e.target.value)}
+                  placeholder="e.g. Guru Pharmacy Main"
+                  disabled={!isSuperAdmin && !isDevAccount}
+                />
+              </div>
+              <div>
+                <Label>GST Number (GSTIN)</Label>
+                <Input
+                  value={profileGstNumber}
+                  onChange={(e) => setProfileGstNumber(e.target.value.toUpperCase())}
+                  placeholder="22AAAAA0000A1Z5"
+                  maxLength={20}
+                  className="uppercase font-mono"
+                  disabled={!isSuperAdmin && !isDevAccount}
+                />
+              </div>
+              <div>
+                <Label>Official Phone Number</Label>
+                <Input
+                  value={profilePhone}
+                  onChange={(e) => setProfilePhone(e.target.value)}
+                  placeholder="e.g. +91 98765 43210"
+                  disabled={!isSuperAdmin && !isDevAccount}
+                />
+              </div>
+              <div>
+                <Label>Official Email Address</Label>
+                <Input
+                  type="email"
+                  value={profileEmail}
+                  onChange={(e) => setProfileEmail(e.target.value)}
+                  placeholder="e.g. contact@gurupharmacy.com"
+                  disabled={!isSuperAdmin && !isDevAccount}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <Label>Official Registered Address</Label>
+                <Textarea
+                  value={profileAddress}
+                  onChange={(e) => setProfileAddress(e.target.value)}
+                  placeholder="Full official registered address (press Enter for new lines)"
+                  rows={3}
+                  disabled={!isSuperAdmin && !isDevAccount}
+                />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Multi-line address formatting is preserved on invoices and printed documents.
+                </p>
+              </div>
+            </div>
+
+            {(isSuperAdmin || isDevAccount) && (
+              <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+                <Button
+                  onClick={handleSaveStoreProfile}
+                  disabled={savingProfile}
+                  className="flex items-center gap-1.5 w-full sm:w-auto justify-center"
+                >
+                  {savingProfile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  <span>{savingProfile ? "Saving..." : "Save Store Profile"}</span>
                 </Button>
               </div>
-            </form>
+            )}
           </CardBody>
         </Card>
       )}
@@ -1101,8 +1104,9 @@ const Settings: React.FC = () => {
               Developer only
             </span>
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {FLAG_GROUPS.map((g) => (
+          {/* Feature Controls Grid — Branch Management located directly beneath GRN Entry */}
+          {(() => {
+            const renderFlagCard = (g: (typeof FLAG_GROUPS)[number]) => (
               <div key={g.title} className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5 bg-slate-50/60 dark:bg-slate-800/40">
                 <div className="flex items-center gap-2 mb-2.5">
                   <g.icon className="w-4 h-4 text-sky-600 dark:text-sky-400" />
@@ -1160,6 +1164,11 @@ const Settings: React.FC = () => {
                               },
                               body: JSON.stringify({ minStockFeature: v, role: currentUser?.role || "" }),
                             }).catch(() => {});
+                            return;
+                          }
+                          if (it.key === "branchModule") {
+                            setFlag("branchModule", v);
+                            flashToast(`Branches option ${v ? "enabled" : "disabled"} in developer view`, v ? "ok" : "warn");
                             return;
                           }
                           if (it.key === "paymentsMaster") {
@@ -1329,8 +1338,28 @@ const Settings: React.FC = () => {
                   </p>
                 ) : null}
               </div>
-            ))}
-          </div>
+            );
+
+            const grnGroup = FLAG_GROUPS.find((g) => g.title === "GRN Entry");
+            const branchGroup = FLAG_GROUPS.find((g) => g.title === "Branch Management");
+            const reportsGroup = FLAG_GROUPS.find((g) => g.title === "Reports");
+            const priorGroups = FLAG_GROUPS.filter(
+              (g) => g.title !== "GRN Entry" && g.title !== "Branch Management" && g.title !== "Reports"
+            );
+
+            return (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {priorGroups.map((g) => renderFlagCard(g))}
+                {/* Row 6: Column 1 houses GRN Entry and Branch Management located directly beneath it in the empty space */}
+                <div className="space-y-4">
+                  {grnGroup && renderFlagCard(grnGroup)}
+                  {branchGroup && renderFlagCard(branchGroup)}
+                </div>
+                {/* Row 6: Column 2 houses Reports */}
+                {reportsGroup && renderFlagCard(reportsGroup)}
+              </div>
+            );
+          })()}
         </CardBody>
       </Card>
         </>

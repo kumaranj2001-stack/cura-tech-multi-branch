@@ -1859,72 +1859,31 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // ── STORE PROFILE ENDPOINTS (Restricted exclusively to Super Admin / Developer) ──
-  // Standard Admin and Staff are strictly prohibited from modifying store profiles.
-  if (req.method === "GET" && url.pathname === "/api/store-profile") {
-    try {
-      const snap = await getDoc(doc(db, COLLECTIONS.meta, "app"));
-      const meta = snap.exists() ? snap.data() : {};
-      const branchId = url.searchParams.get("branchId") || "br_main";
-      const profile = (meta.branchProfiles && meta.branchProfiles[branchId]) || {};
-      return sendJson(res, 200, { success: true, branchId, profile }, req);
-    } catch (err) {
-      return sendError(res, 500, err, req);
-    }
-  }
-
-  if ((req.method === "POST" || req.method === "PUT") && url.pathname === "/api/store-profile") {
+  // ── STORE PROFILE ENDPOINTS (Exclusively for Super Admin and Developer) ──
+  if ((req.method === "PUT" || req.method === "POST") && url.pathname === "/api/store-profile") {
     let body = "";
     req.on("data", (chunk) => { body += chunk; });
     req.on("end", async () => {
       try {
-        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" }, req);
+        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
         const payload = JSON.parse(body);
         const auth = getCallerAuth(req);
         const role = (auth && auth.role) || payload.role || req.headers["x-user-role"] || "";
-        const roleLower = String(role).trim().toLowerCase();
-
-        // Enforce strict access control: Exclusively Super Admin (and Developer)
-        if (roleLower !== "superadmin" && roleLower !== "developer") {
-          return sendJson(res, 403, {
-            success: false,
-            error: "Access Denied: Store profile modifications are restricted exclusively to Super Admin accounts. Standard Admins and Staff are not permitted to change store profile settings."
-          }, req);
+        const normRole = String(role || "").trim().toLowerCase();
+        if (normRole !== "superadmin" && normRole !== "developer") {
+          return sendJson(res, 403, { success: false, error: "Access Denied: Store profile modifications are restricted exclusively to Super Admin accounts." });
         }
-
-        const profileInput = payload.profile || payload;
-        const branchId = String(payload.branchId || profileInput.branchId || "br_main").trim();
-        const cleanedProfile = {
-          name: String(profileInput.name || profileInput.storeName || "").trim().slice(0, 100),
-          gstNumber: String(profileInput.gstNumber || "").trim().toUpperCase().slice(0, 25),
-          address: String(profileInput.address || "").trim().slice(0, 500),
-          contact: String(profileInput.contact || profileInput.phone || "").trim().slice(0, 30),
-          email: String(profileInput.email || "").trim().toLowerCase().slice(0, 100),
-        };
-
-        // 1. Update gp_meta/app branchProfiles
-        await setDoc(doc(db, COLLECTIONS.meta, "app"), {
-          branchProfiles: {
-            [branchId]: cleanedProfile,
-          },
+        const branchId = payload.branchId || "br_main";
+        const patch = {
+          storeName: String(payload.storeName || payload.name || "").trim(),
+          address: String(payload.address || "").trim(),
+          gstNumber: String(payload.gstNumber || "").trim().toUpperCase(),
+          phone: String(payload.phone || payload.contact || "").trim(),
+          email: String(payload.email || "").trim(),
           updatedAt: new Date().toISOString(),
-        }, { merge: true });
-
-        // 2. Also keep gp_branches doc in sync
-        try {
-          await setDoc(doc(db, COLLECTIONS.branches, branchId), {
-            storeName: cleanedProfile.name,
-            address: cleanedProfile.address,
-            gstNumber: cleanedProfile.gstNumber,
-            phone: cleanedProfile.contact,
-            email: cleanedProfile.email,
-            updatedAt: new Date().toISOString(),
-          }, { merge: true });
-        } catch (bErr) {
-          console.warn("[StoreProfile sync to branch warning]", bErr.message);
-        }
-
-        return sendJson(res, 200, { success: true, branchId, profile: cleanedProfile }, req);
+        };
+        await setDoc(doc(db, COLLECTIONS.branches, branchId), patch, { merge: true });
+        return sendJson(res, 200, { success: true, profile: patch });
       } catch (err) {
         return sendError(res, 400, err, req);
       }

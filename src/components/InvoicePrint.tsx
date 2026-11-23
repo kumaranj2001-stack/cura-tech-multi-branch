@@ -186,9 +186,9 @@ const InvoicePrint: React.FC<{ invoice: Invoice; onClose: () => void }> = ({ inv
                 <div>Phone: {profile.contact || "+91 98765 43210"}</div>
                 {profile.email ? (
                   <div>Email: {profile.email}</div>
-                ) : !profile.gstNumber ? (
+                ) : (
                   <div>Email: info@gurupharma.com</div>
-                ) : null}
+                )}
                 {profile.gstNumber && (
                   <div className="mt-1 font-semibold text-slate-800">GSTIN: {profile.gstNumber}</div>
                 )}

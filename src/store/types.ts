@@ -14,7 +14,7 @@ export interface Branch {
   address?: string;     // registered address
   gstNumber?: string;   // GSTIN
   phone?: string;
-  email?: string;       // official email
+  email?: string;       // official email address
   active: boolean;
   createdAt: string;
 }
@@ -128,10 +128,12 @@ export interface PaymentSettings {
 
 export interface StoreProfile {
   name?: string;      // pharmacy display name
+  storeName?: string; // alias for display name
   address?: string;   // registered address
   contact?: string;   // phone / contact
+  phone?: string;     // official phone
+  email?: string;     // official email
   gstNumber?: string; // GSTIN
-  email?: string;     // official store email
 }
 
 export interface Supplier {
@@ -278,6 +280,7 @@ export interface FeatureFlags {
   btnSavePdf: boolean;
   btnWhatsApp: boolean;
   grnModule: boolean;
+  branchModule: boolean;
   auditEnabled: boolean;
   auditRetention30: boolean;
   auditRetention60: boolean;
@@ -315,7 +318,6 @@ export interface FeatureFlags {
   minStockFeature: boolean;
   supplierSelfRegistration?: boolean;
   doctorAddAdminAllowed?: boolean;
-  branchesVisible?: boolean;
 }
 
 /* ── Developer-controlled staff / account plans (mutually exclusive) ──── */
@@ -418,6 +420,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   btnSavePdf: true,
   btnWhatsApp: true,
   grnModule: true,
+  branchModule: true,
   auditEnabled: true,
   auditRetention30: true,
   auditRetention60: false,
@@ -455,7 +458,6 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   minStockFeature: true,
   supplierSelfRegistration: false,
   doctorAddAdminAllowed: false,
-  branchesVisible: true,
 };
 
 export const getAuditRetentionDays = (flags: FeatureFlags): number | null => {

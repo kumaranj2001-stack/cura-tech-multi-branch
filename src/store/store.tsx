@@ -38,10 +38,8 @@ const starterBranch: Branch = {
   id: "br_main",
   name: "Main Branch",
   code: "BR001",
-  storeName: "Guru Pharmacy",
   address: "",
   phone: "",
-  email: "",
   active: true,
   createdAt: new Date().toISOString(),
 };
