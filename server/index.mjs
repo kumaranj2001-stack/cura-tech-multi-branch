@@ -1859,38 +1859,6 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // ── STORE PROFILE ENDPOINTS (Exclusively for Super Admin and Developer) ──
-  if ((req.method === "PUT" || req.method === "POST") && url.pathname === "/api/store-profile") {
-    let body = "";
-    req.on("data", (chunk) => { body += chunk; });
-    req.on("end", async () => {
-      try {
-        if (!body) return sendJson(res, 400, { success: false, error: "Empty request body" });
-        const payload = JSON.parse(body);
-        const auth = getCallerAuth(req);
-        const role = (auth && auth.role) || payload.role || req.headers["x-user-role"] || "";
-        const normRole = String(role || "").trim().toLowerCase();
-        if (normRole !== "superadmin" && normRole !== "developer") {
-          return sendJson(res, 403, { success: false, error: "Access Denied: Store profile modifications are restricted exclusively to Super Admin accounts." });
-        }
-        const branchId = payload.branchId || "br_main";
-        const patch = {
-          storeName: String(payload.storeName || payload.name || "").trim(),
-          address: String(payload.address || "").trim(),
-          gstNumber: String(payload.gstNumber || "").trim().toUpperCase(),
-          phone: String(payload.phone || payload.contact || "").trim(),
-          email: String(payload.email || "").trim(),
-          updatedAt: new Date().toISOString(),
-        };
-        await setDoc(doc(db, COLLECTIONS.branches, branchId), patch, { merge: true });
-        return sendJson(res, 200, { success: true, profile: patch });
-      } catch (err) {
-        return sendError(res, 400, err, req);
-      }
-    });
-    return;
-  }
-
   // ── AUDIT LOG ENDPOINTS (Stores to Firestore gp_audit) ──
   if (req.method === "GET" && url.pathname === "/api/audit") {
     try {

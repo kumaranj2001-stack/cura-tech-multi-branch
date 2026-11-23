@@ -19,7 +19,6 @@ const Branches: React.FC = () => {
     address: "",
     gstNumber: "",
     phone: "",
-    email: "",
     active: true,
   });
 
@@ -44,7 +43,7 @@ const Branches: React.FC = () => {
       return;
     }
     setEdit(null);
-    setForm({ name: "", code: "", storeName: "", address: "", gstNumber: "", phone: "", email: "", active: true });
+    setForm({ name: "", code: "", storeName: "", address: "", gstNumber: "", phone: "", active: true });
     setOpen(true);
   };
 
@@ -61,7 +60,6 @@ const Branches: React.FC = () => {
       address: b.address || "",
       gstNumber: b.gstNumber || "",
       phone: b.phone || "",
-      email: b.email || "",
       active: b.active,
     });
     setOpen(true);
@@ -100,7 +98,6 @@ const Branches: React.FC = () => {
               address: form.address.trim(),
               gstNumber: form.gstNumber.trim().toUpperCase(),
               phone: form.phone.trim(),
-              email: form.email.trim(),
               active: form.active,
             },
             role: currentUser?.role,
@@ -122,7 +119,6 @@ const Branches: React.FC = () => {
                 address: form.address.trim(),
                 gstNumber: form.gstNumber.trim().toUpperCase(),
                 phone: form.phone.trim(),
-                email: form.email.trim(),
                 active: form.active,
               }
             : b
@@ -154,7 +150,6 @@ const Branches: React.FC = () => {
         address: form.address.trim(),
         gstNumber: form.gstNumber.trim().toUpperCase(),
         phone: form.phone.trim(),
-        email: form.email.trim(),
         active: form.active,
       };
 
@@ -346,11 +341,6 @@ const Branches: React.FC = () => {
                   <span className="text-slate-400">📞</span> {b.phone}
                 </div>
               )}
-              {b.email && (
-                <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 flex items-center gap-1.5 truncate">
-                  <span className="text-slate-400">✉️</span> {b.email}
-                </div>
-              )}
 
               <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100 dark:border-slate-700/80">
                 <div className="text-[11px] text-slate-400">
@@ -413,16 +403,16 @@ const Branches: React.FC = () => {
             <div className="flex items-center gap-2 mb-2">
               <span className="w-1.5 h-4 rounded-full bg-sky-500" />
               <span className="text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                Store Profile Details (Printed on Invoices)
+                Store Profile — printed on invoices
               </span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <Label>Business / Pharmacy Name</Label>
+                <Label>Pharmacy Display Name</Label>
                 <Input
                   value={form.storeName}
                   onChange={(e) => setForm({ ...form, storeName: e.target.value })}
-                  placeholder="e.g. Guru Pharmacy Main"
+                  placeholder="e.g. Guru Pharmacy"
                   disabled={loading}
                 />
               </div>
@@ -437,27 +427,8 @@ const Branches: React.FC = () => {
                   disabled={loading}
                 />
               </div>
-              <div>
-                <Label>Official Phone Number</Label>
-                <Input
-                  value={form.phone}
-                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                  placeholder="e.g. +91 98765 43210"
-                  disabled={loading}
-                />
-              </div>
-              <div>
-                <Label>Official Email Address</Label>
-                <Input
-                  type="email"
-                  value={form.email}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  placeholder="e.g. contact@gurupharmacy.com"
-                  disabled={loading}
-                />
-              </div>
               <div className="sm:col-span-2">
-                <Label>Official Registered Address</Label>
+                <Label>Registered Address</Label>
                 <Textarea
                   value={form.address}
                   onChange={(e) => setForm({ ...form, address: e.target.value })}
@@ -470,6 +441,16 @@ const Branches: React.FC = () => {
                 </p>
               </div>
             </div>
+          </div>
+
+          <div>
+            <Label>Phone</Label>
+            <Input
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              placeholder="Branch phone number"
+              disabled={loading}
+            />
           </div>
 
           <div className="flex items-center gap-2 pt-1">

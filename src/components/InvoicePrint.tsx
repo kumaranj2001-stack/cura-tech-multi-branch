@@ -14,7 +14,6 @@ const InvoicePrint: React.FC<{ invoice: Invoice; onClose: () => void }> = ({ inv
     address: branch?.address || "",
     contact: branch?.phone || "",
     gstNumber: branch?.gstNumber || "",
-    email: branch?.email || "",
   };
   const [busy, setBusy] = useState<"pdf" | "wa" | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
@@ -184,13 +183,10 @@ const InvoicePrint: React.FC<{ invoice: Invoice; onClose: () => void }> = ({ inv
               <div className="text-left sm:text-right text-xs text-slate-600">
                 <div className="font-semibold text-slate-800">TAX INVOICE</div>
                 <div>Phone: {profile.contact || "+91 98765 43210"}</div>
-                {profile.email ? (
-                  <div>Email: {profile.email}</div>
+                {profile.gstNumber ? (
+                  <div className="mt-1 font-semibold text-slate-800">GSTIN: {profile.gstNumber}</div>
                 ) : (
                   <div>Email: info@gurupharma.com</div>
-                )}
-                {profile.gstNumber && (
-                  <div className="mt-1 font-semibold text-slate-800">GSTIN: {profile.gstNumber}</div>
                 )}
               </div>
             </div>

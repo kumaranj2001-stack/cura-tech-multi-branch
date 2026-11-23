@@ -57,11 +57,6 @@ const Inner: React.FC = () => {
     setPage("settings");
     return null;
   }
-  // Developer toggle: hide Branches completely when branchModule is disabled
-  if (!flags.branchModule && page === "branches") {
-    setPage("dashboard");
-    return null;
-  }
   // Branches tab / multi-branch tools: Developer always has access; Super Admin requires multi-branch plan
   if (page === "branches" && currentUser.role !== "developer" && !planAllowsMultiBranch(staffPlan, customStaffPlanLimits)) {
     setPage("dashboard");

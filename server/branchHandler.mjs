@@ -9,12 +9,6 @@ export function isBranchCreatorRole(role) {
   return String(role).trim().toLowerCase() === "developer";
 }
 
-export function isStoreProfileModifierRole(role) {
-  if (!role) return false;
-  const r = String(role).trim().toLowerCase();
-  return r === "developer" || r === "superadmin";
-}
-
 export function validateBranchPayload(payload) {
   const errors = [];
   if (!payload || typeof payload !== "object") {
@@ -38,7 +32,6 @@ export function validateBranchPayload(payload) {
     address: String(payload.address || "").trim(),
     gstNumber: String(payload.gstNumber || "").trim().toUpperCase(),
     phone: String(payload.phone || "").trim(),
-    email: String(payload.email || "").trim(),
     active: payload.active !== false,
     createdAt: payload.createdAt || new Date().toISOString(),
   };
@@ -80,39 +73,11 @@ export function createBranch(payload, existingBranches = [], role = "") {
 }
 
 export function updateBranch(id, patch, existingBranches = [], role = "") {
-  const normRole = String(role || "").trim().toLowerCase();
-  const isDev = normRole === "developer";
-  const isSuper = normRole === "superadmin";
-
-  if (!isDev && !isSuper) {
-    const err = new Error("Access Denied: Store profile and branch modifications are restricted exclusively to Super Admin and Developer accounts. Standard Admins and Staff are not permitted to modify branch or store details.");
+  // Only developer can update or toggle branches
+  if (!isBranchCreatorRole(role)) {
+    const err = new Error("Access Denied: Only Developer can modify branch details or change active status.");
     err.statusCode = 403;
     throw err;
-  }
-
-  // If modifying branch structure (name, code, active status), strictly restrict to Developer
-  const changingStructure = (patch.name !== undefined && patch.name !== "") ||
-                           (patch.code !== undefined && patch.code !== "") ||
-                           patch.active !== undefined;
-  if (!isDev && changingStructure) {
-    const currentBranchObj = existingBranches.find((b) => b.id === id);
-    if (currentBranchObj) {
-      if (patch.name && String(patch.name).trim() !== currentBranchObj.name) {
-        const err = new Error("Access Denied: Only Developer can modify branch name or code. Super Admin can only configure store profile details.");
-        err.statusCode = 403;
-        throw err;
-      }
-      if (patch.code && String(patch.code).trim().toUpperCase() !== currentBranchObj.code) {
-        const err = new Error("Access Denied: Only Developer can modify branch code.");
-        err.statusCode = 403;
-        throw err;
-      }
-      if (patch.active !== undefined && Boolean(patch.active) !== currentBranchObj.active) {
-        const err = new Error("Access Denied: Only Developer can activate or deactivate branches.");
-        err.statusCode = 403;
-        throw err;
-      }
-    }
   }
 
   const current = existingBranches.find((b) => b.id === id);
@@ -141,7 +106,6 @@ export function updateBranch(id, patch, existingBranches = [], role = "") {
     address: patch.address !== undefined ? String(patch.address).trim() : current.address,
     gstNumber: patch.gstNumber !== undefined ? String(patch.gstNumber).trim().toUpperCase() : current.gstNumber,
     phone: patch.phone !== undefined ? String(patch.phone).trim() : current.phone,
-    email: patch.email !== undefined ? String(patch.email).trim() : current.email,
     active: patch.active !== undefined ? Boolean(patch.active) : current.active,
     updatedAt: new Date().toISOString(),
   };

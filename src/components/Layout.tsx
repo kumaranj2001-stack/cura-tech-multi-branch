@@ -70,8 +70,6 @@ const Layout: React.FC<{ page: PageId; setPage: (p: PageId) => void; children: R
     if (!flags.grnModule && (n.id === "purchases" || n.id === "grn" || n.id === "approvedGrn")) return false;
     // hide Audit Log when logging is disabled
     if (!flags.auditEnabled && n.id === "audit") return false;
-    // Developer toggle: completely hide 'Branches' when branchModule is disabled
-    if (n.id === "branches" && !flags.branchModule) return false;
     if (n.id === "branches" && !multiBranch && currentUser?.role !== "developer") return false;
     // Privacy policy option in menu is accessible purely to Developer (non-developers see it embedded in Settings)
     if (n.id === "privacy" && currentUser?.role !== "developer") return false;
