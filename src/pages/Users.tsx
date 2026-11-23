@@ -7,7 +7,7 @@ import type { User, UserRole } from "../store/types";
 import { isOverseer, canCreateAccount, formatPlanCap, staffPlanLimits } from "../store/types";
 
 const Users: React.FC = () => {
-  const { data, currentUser, currentBranch, log, staffPlan, customStaffPlanLimits, createUser, updateUser, deleteUser, flashToast } = useStore();
+  const { data, currentUser, currentBranch, log, staffPlan, customStaffPlanLimits, createUser, updateUser, deleteUser, flashToast, flags } = useStore();
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<User | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -45,7 +45,7 @@ const Users: React.FC = () => {
     let list = data.users;
     // Developer accounts must be entirely omitted from the view of Super Admins, Admins, and Staff
     if (!isDev) {
-      list = list.filter((u) => u.role !== "developer" && u.username !== "guru");
+      list = list.filter((u) => u.role !== "developer" && u.username !== "curatech" && u.username !== "guru");
     }
     if (isDeveloper) {
       return branchFilter === "all" ? list : list.filter((u) => u.branchId === branchFilter);
@@ -218,7 +218,7 @@ const Users: React.FC = () => {
       alert("Cannot delete your own account");
       return;
     }
-    if (u.role === "developer" || u.username === "guru") {
+    if (u.role === "developer" || u.username === "curatech" || u.username === "guru") {
       alert("Primary developer account cannot be deleted.");
       return;
     }
@@ -295,7 +295,7 @@ const Users: React.FC = () => {
               )}
             </div>
           </div>
-          {isDeveloper && (
+          {isDeveloper && flags.multiBranch !== false && (
             <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
               <Label className="mb-0 shrink-0 text-xs">Filter by branch:</Label>
               <Select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} className="w-full sm:w-auto sm:max-w-xs text-xs">
@@ -365,7 +365,9 @@ const Users: React.FC = () => {
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Username</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Name</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Branch</th>
+                  {flags.multiBranch !== false && (
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Branch</th>
+                  )}
                   <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Role</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Created</th>
@@ -377,11 +379,13 @@ const Users: React.FC = () => {
                   <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
                     <td className="px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-200">{u.username}</td>
                     <td className="px-4 py-3 text-sm text-slate-700 dark:text-slate-300">{u.name}</td>
-                    <td className="px-4 py-3">
-                      <span className="inline-flex items-center rounded-full bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 px-2 py-0.5 text-xs font-medium">
-                        {branchName(u.branchId)}
-                      </span>
-                    </td>
+                    {flags.multiBranch !== false && (
+                      <td className="px-4 py-3">
+                        <span className="inline-flex items-center rounded-full bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 px-2 py-0.5 text-xs font-medium">
+                          {branchName(u.branchId)}
+                        </span>
+                      </td>
+                    )}
                     <td className="px-4 py-3">{roleBadge(u)}</td>
                     <td className="px-4 py-3">{u.active ? <Badge tone="green">Active</Badge> : <Badge tone="red">Inactive</Badge>}</td>
                     <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(u.createdAt)}</td>
@@ -442,6 +446,7 @@ const Users: React.FC = () => {
                 </p>
               )}
             </div>
+            {flags.multiBranch !== false && (
             <div>
               <Label>{form.role === "developer" || form.role === "superadmin" ? "Branch (not required)" : "Branch *"}</Label>
               <Select
@@ -464,6 +469,7 @@ const Users: React.FC = () => {
                 <p className="text-[11px] text-slate-400 mt-1">New users are added to your branch only.</p>
               )}
             </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <input id="act" type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} className="rounded" />

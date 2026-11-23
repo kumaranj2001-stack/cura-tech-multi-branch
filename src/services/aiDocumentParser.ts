@@ -148,10 +148,10 @@ async function callOpenRouterDirectly(
   const today = new Date().toISOString().slice(0, 10);
 
   const contextPrompt = `
-Known Registered Suppliers in Guru Pharma:
+Known Registered Suppliers in CuraTech Pharma:
 ${JSON.stringify(compactSuppliers, null, 2)}
 
-Known Inventory Medicines in Guru Pharma:
+Known Inventory Medicines in CuraTech Pharma:
 ${JSON.stringify(compactMedicines, null, 2)}
 
 Today's System Date: ${today}
@@ -205,7 +205,7 @@ Identify and map:
     ];
   }
 
-  const systemPrompt = `You are an expert pharmaceutical document parser and invoice normalization engine for Guru Pharma ERP.
+  const systemPrompt = `You are an expert pharmaceutical document parser and invoice normalization engine for CuraTech Pharma ERP.
 You MUST perform SEMANTIC ANALYSIS of table headers and data fields instead of relying on fixed positions.
 
 CRITICAL RULES:
@@ -288,8 +288,8 @@ Output STRICTLY valid JSON:
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://gurupharma.local",
-        "X-Title": "Guru Pharma GRN Parser",
+        "HTTP-Referer": "https://curatechpharma.local",
+        "X-Title": "CuraTech Pharma GRN Parser",
       },
       body: JSON.stringify({
         model: modelName,

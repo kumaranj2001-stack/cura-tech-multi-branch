@@ -8,13 +8,14 @@ interface ThemeCtx {
   setTheme: (t: Theme) => void;
 }
 
-const THEME_KEY = "guru_pharma_theme";
+const THEME_KEY = "curatech_pharma_theme";
+const LEGACY_THEME_KEY = "guru_pharma_theme";
 const Ctx = createContext<ThemeCtx | null>(null);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setThemeState] = useState<Theme>(() => {
     try {
-      const saved = localStorage.getItem(THEME_KEY);
+      const saved = localStorage.getItem(THEME_KEY) || localStorage.getItem(LEGACY_THEME_KEY);
       if (saved === "dark" || saved === "light") return saved;
     } catch {}
     return "light";

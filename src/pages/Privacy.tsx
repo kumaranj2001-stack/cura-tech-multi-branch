@@ -8,7 +8,7 @@ const SECTIONS = [
     icon: HeartPulse,
     tone: "text-rose-600 bg-rose-50 dark:bg-rose-900/30",
     title: "Personal & Health Information",
-    body: "Guru collects only the personal and health information necessary to run a pharmacy — patient names, contact details, prescription records, and medication history. Every record is collected and stored securely, encrypted in transit, and held in access-controlled cloud storage. Health-related data is treated as confidential at all times.",
+    body: "CuraTech collects only the personal and health information necessary to run a pharmacy — patient names, contact details, prescription records, and medication history. Every record is collected and stored securely, encrypted in transit, and held in access-controlled cloud storage. Health-related data is treated as confidential at all times.",
   },
   {
     icon: FileText,
@@ -32,7 +32,7 @@ const SECTIONS = [
     icon: Handshake,
     tone: "text-amber-600 bg-amber-50 dark:bg-amber-900/30",
     title: "No Third-Party Sharing Without Consent",
-    body: "Guru confirms that no personal, health, or financial data is shared, sold, or disclosed to any third party without your explicit consent — except where disclosure is required by law or pharmacy regulation.",
+    body: "CuraTech confirms that no personal, health, or financial data is shared, sold, or disclosed to any third party without your explicit consent — except where disclosure is required by law or pharmacy regulation.",
   },
   {
     icon: Database,
@@ -57,18 +57,18 @@ export const Privacy: React.FC<{ onBack?: () => void }> = ({ onBack }) => (
           </button>
         )}
         <div className="w-14 h-14 rounded-2xl bg-white ring-1 ring-slate-200 dark:ring-slate-700 flex items-center justify-center overflow-hidden shadow-sm">
-          <img src={logoUrl} alt="Guru logo" className="w-11 h-11 object-contain" />
+          <img src={logoUrl} alt="CuraTech logo" className="w-11 h-11 object-contain" />
         </div>
         <div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-800 dark:text-slate-100">Privacy Policy</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">Guru Pharmacy Management System · Effective {new Date().getFullYear()}</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">CuraTech Pharmacy Management System · Effective {new Date().getFullYear()}</p>
         </div>
       </div>
 
       <div className="rounded-xl border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 px-4 py-3 mb-6 flex items-start gap-3">
         <ShieldCheck className="w-5 h-5 text-teal-600 dark:text-teal-300 shrink-0 mt-0.5" />
         <p className="text-sm text-teal-800 dark:text-teal-200 leading-relaxed">
-          Your trust matters. This policy explains exactly how Guru collects, protects, and uses your data — and our commitment that it is never shared without your consent.
+          Your trust matters. This policy explains exactly how CuraTech collects, protects, and uses your data — and our commitment that it is never shared without your consent.
         </p>
       </div>
 
@@ -92,7 +92,7 @@ export const Privacy: React.FC<{ onBack?: () => void }> = ({ onBack }) => (
       </div>
 
       <p className="text-center text-xs text-slate-400 dark:text-slate-500 mt-8">
-        © {new Date().getFullYear()} Guru · Pharmacy Management System · Data stays under your pharmacy's control
+        © {new Date().getFullYear()} CuraTech · Pharmacy Management System · Data stays under your pharmacy's control
       </p>
     </div>
   </div>

@@ -311,6 +311,7 @@ export interface FeatureFlags {
   repUserSalesPdf: boolean;
   narcoticPrescriptionRequired: boolean;
   minStockFeature: boolean;
+  multiBranch?: boolean;
   supplierSelfRegistration?: boolean;
   doctorAddAdminAllowed?: boolean;
 }
@@ -450,6 +451,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   repUserSalesPdf: true,
   narcoticPrescriptionRequired: true,
   minStockFeature: true,
+  multiBranch: true,
   supplierSelfRegistration: false,
   doctorAddAdminAllowed: false,
 };

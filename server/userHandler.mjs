@@ -1,5 +1,5 @@
 /**
- * User Management Handler for Cura-Tech / Guru Pharma ERP
+ * User Management Handler for CuraTech Pharma ERP
  * Handles user validation, creation, editing (name, username, password, role, branch),
  * password resets, activation toggles, and deletion.
  */
@@ -62,7 +62,7 @@ export function listUsers(users = [], options = {}, callerRole = "") {
   return (users || []).filter((u) => {
     if (!u) return false;
     // Developer accounts must be entirely omitted from non-developer roles
-    if (!isDevCaller && (u.role === "developer" || u.username === "guru")) {
+    if (!isDevCaller && (u.role === "developer" || u.username === "curatech" || u.username === "guru")) {
       return false;
     }
     if (branchId && branchId !== "all" && u.branchId !== branchId) return false;
@@ -226,7 +226,7 @@ export function deleteUser(id, existingUsers = [], callerRole = "") {
   }
 
   // Prevent deleting the primary developer account
-  if (target.username === "guru" && target.role === "developer") {
+  if ((target.username === "curatech" || target.username === "guru") && target.role === "developer") {
     const err = new Error("Cannot delete the primary Developer account.");
     err.statusCode = 403;
     throw err;

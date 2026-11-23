@@ -39,11 +39,11 @@ if (isFirebaseConfigured) {
       }
     }
   } catch (err) {
-    console.error("[Guru] Firebase initialization error:", err);
+    console.error("[CuraTech] Firebase initialization error:", err);
   }
 } else {
   // eslint-disable-next-line no-console
-  console.warn("[Guru] Firebase config missing — set VITE_FIREBASE_* environment variables.");
+  console.warn("[CuraTech] Firebase config missing — set VITE_FIREBASE_* environment variables.");
 }
 
 export const firebaseApp = app;

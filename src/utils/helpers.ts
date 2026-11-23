@@ -102,7 +102,7 @@ export function downloadJSON(filename: string, obj: unknown) {
 }
 
 /* ── PDF export ────────────────────────────────────────────────────────────
-   Branded Guru report: header band, autotable body, totals footer and
+   Branded CuraTech report: header band, autotable body, totals footer and
    page numbers. ₹ is rendered as "Rs." because jsPDF's built-in fonts use
    WinAnsi encoding which has no rupee glyph.                              */
 export function downloadPDF(opts: {
@@ -137,7 +137,7 @@ export function downloadPDF(opts: {
       doc.setTextColor(255, 255, 255);
       doc.setFont("helvetica", "bold");
       doc.setFontSize(17);
-      doc.text("GURU", 92, 32);
+      doc.text("CURATECH", 92, 32);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8.5);
       doc.text("Pharmacy Management System", 92, 47);
@@ -168,7 +168,7 @@ export function downloadPDF(opts: {
           const H = doc.internal.pageSize.getHeight();
           doc.setFontSize(7.5);
           doc.setTextColor(148, 163, 184);
-          doc.text("Guru · Pharmacy ERP", 40, H - 24);
+          doc.text("CuraTech · Pharmacy ERP", 40, H - 24);
           doc.text(`Page ${doc.getNumberOfPages()}`, W - 40, H - 24, { align: "right" });
         },
       });
@@ -261,7 +261,7 @@ export function invoicePdfBlob(inv: {
       } catch { /* logo optional */ }
       doc.setTextColor(255, 255, 255);
       doc.setFont("helvetica", "bold"); doc.setFontSize(17);
-      doc.text("GURU", 92, 32);
+      doc.text("CURATECH", 92, 32);
       doc.setFont("helvetica", "normal"); doc.setFontSize(8.5);
       doc.text("Pharmacy Management System", 92, 47);
       doc.setFont("helvetica", "bold"); doc.setFontSize(11);
@@ -316,7 +316,7 @@ export function invoicePdfBlob(inv: {
 
       doc.setFont("helvetica", "normal"); doc.setFontSize(8);
       doc.setTextColor(148, 163, 184);
-      doc.text("Thank you for choosing Guru. Get well soon!", W / 2, doc.internal.pageSize.getHeight() - 30, { align: "center" });
+      doc.text("Thank you for choosing CuraTech. Get well soon!", W / 2, doc.internal.pageSize.getHeight() - 30, { align: "center" });
 
       return doc.output("blob");
     })

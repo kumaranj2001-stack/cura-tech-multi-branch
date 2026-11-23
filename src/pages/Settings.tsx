@@ -8,7 +8,7 @@ import { isOverseer, STAFF_PLAN_OPTIONS, formatPlanCap, staffPlanLimits, DEFAULT
 import { parseBranchBackup } from "../store/store";
 import { firebaseConfig } from "../config/firebaseConfig";
 import Privacy from "./Privacy";
-import { FileDown, Upload, Package, Filter, BarChart3, LayoutDashboard, QrCode, Loader2, ShieldCheck, CreditCard, AlertTriangle, Clock, Sliders, Trash2, Shield, Building2, Stethoscope } from "lucide-react";
+import { FileDown, Upload, Package, Filter, BarChart3, LayoutDashboard, QrCode, Loader2, ShieldCheck, CreditCard, AlertTriangle, Clock, Sliders, Trash2, Shield, Building2, Stethoscope, GitBranch, Store } from "lucide-react";
 
 const Toggle: React.FC<{ on: boolean; onChange: (v: boolean) => void; label: string; hint?: string; disabled?: boolean }> = ({ on, onChange, label, hint, disabled }) => (
   <button
@@ -109,6 +109,11 @@ const FLAG_GROUPS: {
         key: "grnModule",
         label: "GRN Entry & Approvals",
         hint: "When enabled, hides '+ Add Medicine' in Inventory and routes stock entry through GRN. When disabled, restores direct medicine addition in Inventory.",
+      },
+      {
+        key: "grnAutoFill",
+        label: "Auto-fill from supplier invoice",
+        hint: "PDF / Excel import & auto population for GRN entries",
       },
     ],
   },
@@ -252,9 +257,15 @@ const FLAG_GROUPS: {
     ],
   },
   {
-    title: "GRN Entry",
-    icon: Package,
-    items: [{ key: "grnAutoFill", label: "Auto-fill from supplier invoice", hint: "PDF / Excel import & auto population" }],
+    title: "Branch Controls",
+    icon: GitBranch,
+    items: [
+      {
+        key: "multiBranch",
+        label: "Multi-Branch Management",
+        hint: "Manage multiple branches with separate inventories and branch switching. When disabled, hides branch management interfaces and enables Store Profile.",
+      },
+    ],
   },
   {
     title: "Reports",
@@ -382,7 +393,7 @@ service cloud.firestore {
 }`;
 
 const Settings: React.FC = () => {
-  const { data, currentUser, log, cloudReady, cloudSyncing, cloudError, flags, setFlag, setFlagsBatch, staffPlan, setStaffPlan, customStaffPlanLimits, payment, branchPayments, setBranchPayment, buildBranchBackup, restoreBranchBackup, purgeAllBusinessData } = useStore();
+  const { data, setData, currentUser, currentBranch, log, cloudReady, cloudSyncing, cloudError, flags, setFlag, setFlagsBatch, staffPlan, setStaffPlan, customStaffPlanLimits, payment, branchPayments, setBranchPayment, branchProfiles, setBranchProfile, buildBranchBackup, restoreBranchBackup, purgeAllBusinessData } = useStore();
   const isSuperAdmin = currentUser?.role === "superadmin";
   const isAdmin = currentUser?.role === "admin";
   const isDeveloper = isOverseer(currentUser?.role);
@@ -497,6 +508,96 @@ const Settings: React.FC = () => {
   const [rulesCopied, setRulesCopied] = useState(false);
   const [backupBranchId, setBackupBranchId] = useState("");
 
+  // Store Profile settings (rendered when Multi-Branch functionality is disabled)
+  const targetStoreBranch = data.branches[0] || currentBranch || { id: "br_main", name: "CuraTech Pharmacy", code: "BR001", active: true, createdAt: new Date().toISOString() };
+  const targetStoreBranchId = targetStoreBranch.id || "br_main";
+  const currentStoreProfile = branchProfiles[targetStoreBranchId] || {};
+
+  const [storeProfileForm, setStoreProfileForm] = useState({
+    name: currentStoreProfile.name ?? targetStoreBranch.storeName ?? targetStoreBranch.name ?? "CuraTech Pharmacy",
+    gstNumber: currentStoreProfile.gstNumber ?? targetStoreBranch.gstNumber ?? "",
+    address: currentStoreProfile.address ?? targetStoreBranch.address ?? "",
+    contact: currentStoreProfile.contact ?? targetStoreBranch.phone ?? "",
+  });
+  const [storeProfileSaving, setStoreProfileSaving] = useState(false);
+
+  React.useEffect(() => {
+    const prof = branchProfiles[targetStoreBranchId] || {};
+    const br = data.branches.find((b) => b.id === targetStoreBranchId) || targetStoreBranch;
+    setStoreProfileForm({
+      name: prof.name ?? br.storeName ?? br.name ?? "CuraTech Pharmacy",
+      gstNumber: prof.gstNumber ?? br.gstNumber ?? "",
+      address: prof.address ?? br.address ?? "",
+      contact: prof.contact ?? br.phone ?? "",
+    });
+  }, [targetStoreBranchId, branchProfiles, data.branches]);
+
+  const handleSaveStoreProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStoreProfileSaving(true);
+    try {
+      const trimmedName = storeProfileForm.name.trim();
+      const trimmedGst = storeProfileForm.gstNumber.trim().toUpperCase();
+      const trimmedAddress = storeProfileForm.address.trim();
+      const trimmedPhone = storeProfileForm.contact.trim();
+
+      // 1. Update store profile in branch profiles metadata
+      setBranchProfile(targetStoreBranchId, {
+        name: trimmedName,
+        gstNumber: trimmedGst,
+        address: trimmedAddress,
+        contact: trimmedPhone,
+      });
+
+      // 2. Update branches in state & Cloud Firestore
+      setData((d) => ({
+        ...d,
+        branches: d.branches.map((b) =>
+          b.id === targetStoreBranchId
+            ? {
+                ...b,
+                name: trimmedName || b.name,
+                storeName: trimmedName,
+                gstNumber: trimmedGst,
+                address: trimmedAddress,
+                phone: trimmedPhone,
+              }
+            : b
+        ),
+      }));
+
+      // 3. Update backend branch API
+      try {
+        await fetch(`/api/branches/${targetStoreBranchId}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "x-user-role": currentUser?.role || "",
+          },
+          body: JSON.stringify({
+            patch: {
+              name: trimmedName,
+              storeName: trimmedName,
+              address: trimmedAddress,
+              gstNumber: trimmedGst,
+              phone: trimmedPhone,
+            },
+            role: currentUser?.role,
+          }),
+        });
+      } catch (err) {
+        console.warn("[Backend branch update error]", err);
+      }
+
+      log("STORE_PROFILE_UPDATE", `Updated store profile for invoice printing: ${trimmedName}`);
+      flashToast("Store profile saved successfully. Invoice printing updated.", "ok");
+    } catch (err) {
+      flashToast(err instanceof Error ? err.message : "Failed to save store profile", "err");
+    } finally {
+      setStoreProfileSaving(false);
+    }
+  };
+
   const copyRules = async () => {
     try {
       await navigator.clipboard.writeText(FIRESTORE_RULES);
@@ -521,7 +622,7 @@ const Settings: React.FC = () => {
     }
     const payload = buildBranchBackup(targetBackupBranchId);
     const code = targetBackupBranch?.code || targetBackupBranchId;
-    downloadJSON(`guru-backup-${code}-${new Date().toISOString().slice(0, 10)}.json`, payload);
+    downloadJSON(`curatech-backup-${code}-${new Date().toISOString().slice(0, 10)}.json`, payload);
     log("BACKUP_EXPORT", `Branch backup downloaded for ${targetBackupBranch?.name || targetBackupBranchId}`);
   };
 
@@ -662,6 +763,85 @@ const Settings: React.FC = () => {
           </div>
         </CardBody>
       </Card>
+
+      {/* Store Profile — displayed when Multi-Branch functionality is disabled */}
+      {!flags.multiBranch && (
+        <Card>
+          <CardBody className="space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                  <Store className="w-5 h-5 text-sky-600 dark:text-sky-400" />
+                  Store Profile
+                </div>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                  Configure your pharmacy's display name, GST number, registered address, and phone number for invoice printing.
+                </p>
+              </div>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-900/30 px-2.5 py-1 text-[11px] font-semibold text-sky-700 dark:text-sky-300 shrink-0">
+                Single Store Active
+              </span>
+            </div>
+
+            <form onSubmit={handleSaveStoreProfile} className="space-y-4 pt-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label>Pharmacy Display Name *</Label>
+                  <Input
+                    value={storeProfileForm.name}
+                    onChange={(e) => setStoreProfileForm((prev) => ({ ...prev, name: e.target.value }))}
+                    placeholder="e.g. CuraTech Pharmacy"
+                    required
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">Prints at the top of customer invoices and receipts</p>
+                </div>
+
+                <div>
+                  <Label>GST Number (GSTIN)</Label>
+                  <Input
+                    value={storeProfileForm.gstNumber}
+                    onChange={(e) => setStoreProfileForm((prev) => ({ ...prev, gstNumber: e.target.value.toUpperCase() }))}
+                    placeholder="e.g. 33AAAAA0000A1Z5"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">Shown on tax invoices and compliance documentation</p>
+                </div>
+              </div>
+
+              <div>
+                <Label>Registered Address</Label>
+                <textarea
+                  value={storeProfileForm.address}
+                  onChange={(e) => setStoreProfileForm((prev) => ({ ...prev, address: e.target.value }))}
+                  rows={2}
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-colors"
+                  placeholder="e.g. 123 Healthcare Ave, Medical District, Chennai 600001"
+                />
+                <p className="text-[11px] text-slate-400 mt-1">Full registered address formatted for invoice headers</p>
+              </div>
+
+              <div>
+                <Label>Phone Number</Label>
+                <Input
+                  value={storeProfileForm.contact}
+                  onChange={(e) => setStoreProfileForm((prev) => ({ ...prev, contact: e.target.value }))}
+                  placeholder="e.g. +91 98765 43210"
+                />
+                <p className="text-[11px] text-slate-400 mt-1">Contact number printed on customer receipts</p>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                <Button type="submit" disabled={storeProfileSaving}>
+                  {storeProfileSaving ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : null}
+                  Save Store Profile
+                </Button>
+                <span className="text-xs text-slate-400 dark:text-slate-500">
+                  Updates reflect instantly on all printed invoices
+                </span>
+              </div>
+            </form>
+          </CardBody>
+        </Card>
+      )}
 
       {/* Staff Management — developer only */}
       {isDevAccount && (
@@ -1145,14 +1325,18 @@ const Settings: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <div className="font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                💳 Payments — {data.branches.find((b) => b.id === activePayBranchId)?.name || "Main Branch"}
+                💳 Payments {flags.multiBranch !== false ? `— ${data.branches.find((b) => b.id === activePayBranchId)?.name || "Main Branch"}` : ""}
               </div>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Branch-level payment settings for <b>{data.branches.find((b) => b.id === activePayBranchId)?.name || "your branch"}</b>.
-                {flags.payPos ? " POS Swipe Machine is active — card/UPI bills push to the terminal." : isBranchDigitalEnabled ? " Digital Payments active — UPI QR and payment details show on the billing screen." : " Digital Payments disabled for this branch by Developer."}
+                {flags.multiBranch !== false ? (
+                  <>Branch-level payment settings for <b>{data.branches.find((b) => b.id === activePayBranchId)?.name || "your branch"}</b>.</>
+                ) : (
+                  <>Configure store payment methods and UPI QR for billing screens.</>
+                )}
+                {flags.payPos ? " POS Swipe Machine is active — card/UPI bills push to the terminal." : isBranchDigitalEnabled ? " Digital Payments active — UPI QR and payment details show on the billing screen." : " Digital Payments disabled by Developer."}
               </p>
             </div>
-            {isSuperAdmin && data.branches.length > 1 && (
+            {isSuperAdmin && flags.multiBranch !== false && data.branches.length > 1 && (
               <div className="shrink-0 w-full sm:w-56">
                 <Label className="text-xs mb-1">Branch Switcher (Super Admin)</Label>
                 <Select value={selectedPayBranchId} onChange={(e) => setSelectedPayBranchId(e.target.value)}>
@@ -1262,7 +1446,7 @@ const Settings: React.FC = () => {
               Developer only
             </span>
           </div>
-          {data.branches.length > 1 && (
+          {flags.multiBranch !== false && data.branches.length > 1 && (
             <div className="max-w-md">
               <Label>Branch</Label>
               <Select value={backupBranchId} onChange={(e) => setBackupBranchId(e.target.value)}>
@@ -1273,9 +1457,9 @@ const Settings: React.FC = () => {
               </Select>
             </div>
           )}
-          {data.branches.length === 1 && (
+          {(flags.multiBranch === false || data.branches.length === 1) && (
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Only one branch is configured: <b>{data.branches[0].name}</b>. Backup and restore apply to this branch.
+              Operating in single-store mode. Backup and restore apply to <b>{data.branches[0]?.name || "Main Store"}</b>.
             </p>
           )}
           <div className="flex flex-wrap gap-3">
@@ -1355,7 +1539,7 @@ const Settings: React.FC = () => {
                 <div>
                   <div className="font-semibold text-slate-800 dark:text-slate-100 text-base">🛡️ Privacy Policy</div>
                   <div className="text-xs text-slate-500 dark:text-slate-400">
-                    Data protection, encryption, and confidentiality standards for Guru Pharmacy
+                    Data protection, encryption, and confidentiality standards for CuraTech Pharmacy
                   </div>
                 </div>
               </div>
@@ -1371,7 +1555,7 @@ const Settings: React.FC = () => {
                   <span>❤️</span> Personal & Health Information
                 </div>
                 <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                  Guru collects only essential pharmacy data — patient profiles, doctor details, and prescription records. Every record is encrypted in transit and stored within access-controlled storage.
+                  CuraTech collects only essential pharmacy data — patient profiles, doctor details, and prescription records. Every record is encrypted in transit and stored within access-controlled storage.
                 </p>
               </div>
 
@@ -1417,7 +1601,7 @@ const Settings: React.FC = () => {
         <CardBody>
           <div className="font-semibold text-slate-800 dark:text-slate-100 mb-2">ℹ️ About</div>
           <div className="text-sm text-slate-600 dark:text-slate-400 space-y-1">
-            <div><b>Guru</b> — Pharmacy Management System v1.0</div>
+            <div><b>CuraTech</b> — Pharmacy Management System v1.0</div>
             <div>Built with React, Vite, TypeScript & Tailwind CSS</div>
             <div>Data syncs through the cloud. The Developer can backup or restore a single branch from this page.</div>
           </div>

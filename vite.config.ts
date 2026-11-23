@@ -25,7 +25,7 @@ function grnIntelligentParserPlugin(): Plugin {
           res.end(
             JSON.stringify({
               status: "ok",
-              service: "Guru Pharma GRN Document Parsing (Vite Middleware)",
+              service: "CuraTech Pharma GRN Document Parsing (Vite Middleware)",
               uptimeSeconds: Math.round(process.uptime()),
               pid: process.pid,
               system: {

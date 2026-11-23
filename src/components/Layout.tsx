@@ -58,7 +58,7 @@ const NAV: NavItem[] = [
 
 const Layout: React.FC<{ page: PageId; setPage: (p: PageId) => void; children: React.ReactNode }> = ({ page, setPage, children }) => {
   const { currentUser, data, logout, cloudSyncing, cloudError, cloudReady, viewBranchId, setViewBranchId, flags, staffPlan, customStaffPlanLimits } = useStore();
-  const multiBranch = planAllowsMultiBranch(staffPlan, customStaffPlanLimits);
+  const multiBranch = flags.multiBranch !== false && planAllowsMultiBranch(staffPlan, customStaffPlanLimits);
   const { theme, toggle } = useTheme();
   const [open, setOpen] = useState(false);
   // Desktop: sidebar is a slim rail that expands on hover
@@ -70,7 +70,8 @@ const Layout: React.FC<{ page: PageId; setPage: (p: PageId) => void; children: R
     if (!flags.grnModule && (n.id === "purchases" || n.id === "grn" || n.id === "approvedGrn")) return false;
     // hide Audit Log when logging is disabled
     if (!flags.auditEnabled && n.id === "audit") return false;
-    if (n.id === "branches" && !multiBranch && currentUser?.role !== "developer") return false;
+    // hide Branches when multi-branch feature is disabled, or when plan disallows it
+    if (n.id === "branches" && (!flags.multiBranch || (!multiBranch && currentUser?.role !== "developer"))) return false;
     // Privacy policy option in menu is accessible purely to Developer (non-developers see it embedded in Settings)
     if (n.id === "privacy" && currentUser?.role !== "developer") return false;
     if (currentUser?.role === "developer") return true;
@@ -102,11 +103,11 @@ const Layout: React.FC<{ page: PageId; setPage: (p: PageId) => void; children: R
       >
         <div className={cn("px-4 lg:px-3 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3 transition-all", rail && "lg:justify-center lg:px-0")}>
           <div className="w-11 h-11 shrink-0 rounded-xl bg-white ring-1 ring-slate-200 dark:ring-slate-600 flex items-center justify-center overflow-hidden shadow-sm">
-            <img src={logoUrl} alt="Guru logo" className="w-9 h-9 object-contain" />
+            <img src={logoUrl} alt="CuraTech logo" className="w-9 h-9 object-contain" />
           </div>
           <div className={cn("min-w-0 transition-all duration-200", rail && "lg:w-0 lg:opacity-0 lg:overflow-hidden")}>
             <div className="font-extrabold tracking-tight text-slate-800 dark:text-slate-100 leading-tight whitespace-nowrap">
-              GU<span className="text-sky-600 dark:text-sky-400">RU</span>
+              CURA<span className="text-sky-600 dark:text-sky-400">TECH</span>
             </div>
             <div className="text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">Pharmacy Suite</div>
           </div>

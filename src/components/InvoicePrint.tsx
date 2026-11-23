@@ -7,13 +7,14 @@ import { Printer, FileDown, MessageCircle, X } from "lucide-react";
 import logoUrl from "../assets/logo.png";
 
 const InvoicePrint: React.FC<{ invoice: Invoice; onClose: () => void }> = ({ invoice, onClose }) => {
-  const { flags, data, currentBranch, currentUser } = useStore();
+  const { flags, data, currentBranch, currentUser, branchProfiles } = useStore();
   const branch = data.branches.find((b) => b.id === (invoice.branchId || currentBranch?.id || currentUser?.branchId || "br_main"));
+  const bp = (branch?.id ? branchProfiles?.[branch.id] : undefined) || branchProfiles?.[currentBranch?.id || "br_main"] || {};
   const profile = {
-    name: branch?.storeName || branch?.name || "",
-    address: branch?.address || "",
-    contact: branch?.phone || "",
-    gstNumber: branch?.gstNumber || "",
+    name: bp.name || branch?.storeName || branch?.name || "CURATECH",
+    address: bp.address || branch?.address || "",
+    contact: bp.contact || branch?.phone || "",
+    gstNumber: bp.gstNumber || branch?.gstNumber || "",
   };
   const [busy, setBusy] = useState<"pdf" | "wa" | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
@@ -65,7 +66,7 @@ const InvoicePrint: React.FC<{ invoice: Invoice; onClose: () => void }> = ({ inv
     setBusy("wa");
     const phone = waNumber(invoice.patientPhone);
     const summary =
-      `*Guru Invoice* ${invoice.number}\n` +
+      `*CuraTech Invoice* ${invoice.number}\n` +
       `Patient: ${invoice.patientName}\n` +
       `Date: ${fmtDateTime(invoice.date)}\n` +
       `Total: ${fmtCurrency(invoice.total)}\n\n` +
@@ -167,9 +168,9 @@ const InvoicePrint: React.FC<{ invoice: Invoice; onClose: () => void }> = ({ inv
             <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4 border-b-2 border-sky-600 pb-4 mb-5">
               <div>
                 <div className="flex items-center gap-3">
-                  <img src={logoUrl} alt="Guru logo" className="w-12 h-12 sm:w-14 sm:h-14 object-contain" />
+                  <img src={logoUrl} alt="CuraTech logo" className="w-12 h-12 sm:w-14 sm:h-14 object-contain" />
                   <div>
-                    <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-sky-700">{profile.name || "GURU"}</h1>
+                    <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-sky-700">{profile.name || "CURATECH"}</h1>
                     <div className="text-xs text-slate-600">Your trusted pharmacy partner</div>
                   </div>
                 </div>
@@ -186,7 +187,7 @@ const InvoicePrint: React.FC<{ invoice: Invoice; onClose: () => void }> = ({ inv
                 {profile.gstNumber ? (
                   <div className="mt-1 font-semibold text-slate-800">GSTIN: {profile.gstNumber}</div>
                 ) : (
-                  <div>Email: info@gurupharma.com</div>
+                  <div>Email: info@curatech.com</div>
                 )}
               </div>
             </div>
@@ -266,7 +267,7 @@ const InvoicePrint: React.FC<{ invoice: Invoice; onClose: () => void }> = ({ inv
             </div>
 
             <div className="mt-8 pt-4 border-t border-slate-200 text-center text-xs text-slate-500">
-              Thank you for choosing Guru. Get well soon! 💊<br />
+              Thank you for choosing CuraTech. Get well soon! 💊<br />
               <span className="text-[10px]">This is a computer-generated invoice and does not require a signature.</span>
             </div>
           </div>

@@ -163,7 +163,7 @@ const server = http.createServer(async (req, res) => {
     const cpuUsage = process.cpuUsage();
     return sendJson(res, 200, {
       status: "ok",
-      service: "Guru Pharma GRN Document Parsing Backend",
+      service: "CuraTech Pharma GRN Document Parsing Backend",
       version: "1.0.0",
       traceId,
       process: {
@@ -359,8 +359,8 @@ const server = http.createServer(async (req, res) => {
                 headers: {
                   Authorization: `Bearer ${effectiveKey}`,
                   "Content-Type": "application/json",
-                  "HTTP-Referer": "https://gurupharma.local",
-                  "X-Title": "Guru Pharma AI Proxy",
+                  "HTTP-Referer": "https://curatechpharma.local",
+                  "X-Title": "CuraTech Pharma AI Proxy",
                 },
                 body: JSON.stringify({ model, messages, max_tokens, temperature }),
               });

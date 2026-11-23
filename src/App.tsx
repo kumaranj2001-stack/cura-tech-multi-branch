@@ -57,8 +57,8 @@ const Inner: React.FC = () => {
     setPage("settings");
     return null;
   }
-  // Branches tab / multi-branch tools: Developer always has access; Super Admin requires multi-branch plan
-  if (page === "branches" && currentUser.role !== "developer" && !planAllowsMultiBranch(staffPlan, customStaffPlanLimits)) {
+  // Branches tab / multi-branch tools: Developer and Super Admin access requires multiBranch feature flag enabled
+  if (page === "branches" && (flags.multiBranch === false || (currentUser.role !== "developer" && !planAllowsMultiBranch(staffPlan, customStaffPlanLimits)))) {
     setPage("dashboard");
     return null;
   }

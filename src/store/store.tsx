@@ -14,9 +14,12 @@ import { flashToast } from "../utils/helpers";
 import type { AppData, AuditLog, Branch, Doctor, FeatureFlags, GRN, Invoice, Medicine, Patient, PaymentSettings, ReturnEntry, StaffPlanLimits, StaffPlanTier, Supplier, User } from "./types";
 import { DEFAULT_CUSTOM_STAFF_LIMITS, DEFAULT_FEATURE_FLAGS, DEFAULT_STAFF_PLAN, isStaffPlanTier, planAllowsMultiBranch, getAuditRetentionMs } from "./types";
 
-const DATA_KEY = "guru_pharma_data_v3";
-const SESSION_KEY = "guru_pharma_session_v3";
-const BRANCH_SESSION_KEY = "guru_pharma_session_branch_v3";
+const DATA_KEY = "curatech_pharma_data_v3";
+const LEGACY_DATA_KEY = "guru_pharma_data_v3";
+const SESSION_KEY = "curatech_pharma_session_v3";
+const LEGACY_SESSION_KEY = "guru_pharma_session_v3";
+const BRANCH_SESSION_KEY = "curatech_pharma_session_branch_v3";
+const LEGACY_BRANCH_SESSION_KEY = "guru_pharma_session_branch_v3";
 
 const COLLECTIONS = {
   branches: "gp_branches",
@@ -47,7 +50,7 @@ const starterBranch: Branch = {
 const defaultUsers: User[] = [
   {
     id: "u_developer",
-    username: "guru",
+    username: "curatech",
     password: "kumaran",
     name: "Developer",
     role: "developer",
@@ -131,7 +134,7 @@ type FirestoreSlices = Record<EntityKey, unknown[]>;
 
 function getLocalData(): AppData | null {
   try {
-    const raw = localStorage.getItem(DATA_KEY);
+    const raw = localStorage.getItem(DATA_KEY) || localStorage.getItem(LEGACY_DATA_KEY);
     if (raw) return JSON.parse(raw) as AppData;
   } catch {}
   return null;
@@ -164,12 +167,12 @@ function ensureDefaults(data: AppData): AppData {
     next.users = [...defaultUsers];
   } else {
     // Preserve at least one developer account so developer access is never permanently locked out
-    const hasDeveloper = next.users.some((u) => u.role === "developer" || u.username === "guru");
+    const hasDeveloper = next.users.some((u) => u.role === "developer" || u.username === "curatech" || u.username === "guru");
     if (!hasDeveloper) {
       const devAccount = defaultUsers.find((u) => u.role === "developer") || {
         id: "u_developer",
         name: "Developer",
-        username: "guru",
+        username: "curatech",
         password: "dev",
         role: "developer" as const,
         active: true,
@@ -179,10 +182,10 @@ function ensureDefaults(data: AppData): AppData {
     }
   }
 
-  // Developer guru role safeguard (preserves developer privileges while respecting custom name & password edits)
-  const guru = next.users.find((u) => u.username === "guru");
-  if (guru && guru.role !== "developer") {
-    guru.role = "developer";
+  // Developer role safeguard (preserves developer privileges while respecting custom name & password edits)
+  const devUser = next.users.find((u) => u.username === "curatech" || u.username === "guru");
+  if (devUser && devUser.role !== "developer") {
+    devUser.role = "developer";
   }
   return next;
 }
@@ -266,7 +269,7 @@ function mergeScoped(full: AppData, scopedNext: AppData, branchId: string | null
 }
 
 export interface BranchBackupFile {
-  kind: "guru-branch";
+  kind: "curatech-branch" | "guru-branch";
   version: 1;
   branchId: string;
   exportedAt: string;
@@ -336,7 +339,7 @@ function mergeBranchRestore(full: AppData, incoming: AppData, branchId: string):
 export function parseBranchBackup(raw: unknown): { data: AppData; branchId?: string; payment?: PaymentSettings; profile?: import("./types").StoreProfile } {
   if (!raw || typeof raw !== "object") throw new Error("Invalid file");
   const obj = raw as Record<string, unknown>;
-  if ((obj.kind === "guru-branch" || obj.kind === "curavite-branch") && obj.data && typeof obj.data === "object") {
+  if ((obj.kind === "curatech-branch" || obj.kind === "guru-branch" || obj.kind === "curavite-branch") && obj.data && typeof obj.data === "object") {
     const data = obj.data as AppData;
     if (!Array.isArray(data.medicines)) throw new Error("Invalid file");
     return {
@@ -589,7 +592,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [fullData, setDataRaw] = useState<AppData>(() => initialData());
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
-      const raw = sessionStorage.getItem(SESSION_KEY);
+      const raw = sessionStorage.getItem(SESSION_KEY) || sessionStorage.getItem(LEGACY_SESSION_KEY);
       return raw ? (JSON.parse(raw) as User) : null;
     } catch {
       return null;
@@ -599,7 +602,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   actingRoleRef.current = currentUser?.role;
   const [currentBranch, setCurrentBranch] = useState<Branch | null>(() => {
     try {
-      const raw = sessionStorage.getItem(BRANCH_SESSION_KEY);
+      const raw = sessionStorage.getItem(BRANCH_SESSION_KEY) || sessionStorage.getItem(LEGACY_BRANCH_SESSION_KEY);
       return raw ? (JSON.parse(raw) as Branch) : null;
     } catch {
       return null;
@@ -895,7 +898,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const buildBranchBackup = useCallback((branchId: string): BranchBackupFile => {
     return {
-      kind: "guru-branch",
+      kind: "curatech-branch",
       version: 1,
       branchId,
       exportedAt: new Date().toISOString(),
@@ -1145,7 +1148,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!current) throw new Error("User not found");
 
     let role = patch.role || current.role;
-    if (current.username === "guru" || current.role === "developer") {
+    if (current.username === "curatech" || current.username === "guru" || current.role === "developer") {
       role = "developer";
     }
 
@@ -1207,7 +1210,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const target = fullDataRef.current.users.find((u) => u.id === id);
     if (!target) return true;
 
-    if (target.role === "developer" || target.username === "guru") {
+    if (target.role === "developer" || target.username === "curatech" || target.username === "guru") {
       throw new Error("Cannot delete primary developer account");
     }
 

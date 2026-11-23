@@ -282,10 +282,10 @@ const Reports: React.FC = () => {
               <div className="bg-[#0284c7] text-white p-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-xl bg-white flex items-center justify-center p-1.5 shrink-0 shadow-sm">
-                    <img src={logoUrl} alt="Guru" className="w-9 h-9 object-contain" />
+                    <img src={logoUrl} alt="CuraTech" className="w-9 h-9 object-contain" />
                   </div>
                   <div>
-                    <div className="text-xl font-bold tracking-tight leading-tight">GURU</div>
+                    <div className="text-xl font-bold tracking-tight leading-tight">CURATECH</div>
                     <div className="text-[11px] text-sky-100 font-medium">Pharmacy Management System</div>
                   </div>
                 </div>
@@ -304,7 +304,7 @@ const Reports: React.FC = () => {
             {/* Standard screen view header */}
             <div className="print:hidden">
               <div className="flex flex-wrap items-center gap-2 mb-1">
-                <h2 className="text-xl font-bold">Guru — Report</h2>
+                <h2 className="text-xl font-bold">CuraTech — Report</h2>
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/30 px-2.5 py-1 text-xs font-semibold text-teal-700 dark:text-teal-300">
                   <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
                   {scopeLabel}

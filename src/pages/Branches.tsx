@@ -412,7 +412,7 @@ const Branches: React.FC = () => {
                 <Input
                   value={form.storeName}
                   onChange={(e) => setForm({ ...form, storeName: e.target.value })}
-                  placeholder="e.g. Guru Pharmacy"
+                  placeholder="e.g. CuraTech Pharmacy"
                   disabled={loading}
                 />
               </div>

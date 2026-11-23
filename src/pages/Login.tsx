@@ -56,10 +56,10 @@ const Login: React.FC = () => {
 
         <div className="relative flex items-center gap-3 rise rise-1">
           <div className="w-12 h-12 rounded-xl bg-white ring-1 ring-white/20 flex items-center justify-center overflow-hidden shadow-lg shadow-sky-900/40">
-            <img src={logoUrl} alt="Guru logo" className="w-10 h-10 object-contain" />
+            <img src={logoUrl} alt="CuraTech logo" className="w-10 h-10 object-contain" />
           </div>
           <div>
-            <div className="text-lg font-extrabold tracking-tight leading-none">GU<span className="text-sky-400">RU</span></div>
+            <div className="text-lg font-extrabold tracking-tight leading-none">CURA<span className="text-sky-400">TECH</span></div>
             <div className="text-[11px] text-slate-400 tracking-wide mt-0.5">PHARMACY ERP</div>
           </div>
         </div>
@@ -109,7 +109,7 @@ const Login: React.FC = () => {
           </div>
         </div>
 
-        <div className="relative text-[11px] text-slate-500">© {new Date().getFullYear()} Guru · Secure session, ends on close</div>
+        <div className="relative text-[11px] text-slate-500">© {new Date().getFullYear()} CuraTech · Secure session, ends on close</div>
       </aside>
 
       {/* ── Form panel ── */}
@@ -126,10 +126,10 @@ const Login: React.FC = () => {
           {/* mobile brand */}
           <div className="lg:hidden flex items-center gap-3 mb-8 rise rise-1">
             <div className="w-12 h-12 rounded-xl bg-white ring-1 ring-slate-200 dark:ring-slate-600 flex items-center justify-center overflow-hidden shadow-lg shadow-sky-200/50 dark:shadow-none">
-              <img src={logoUrl} alt="Guru logo" className="w-10 h-10 object-contain" />
+              <img src={logoUrl} alt="CuraTech logo" className="w-10 h-10 object-contain" />
             </div>
             <div>
-              <div className="text-xl font-extrabold tracking-tight text-slate-800 dark:text-slate-100">GU<span className="text-sky-600 dark:text-sky-400">RU</span></div>
+              <div className="text-xl font-extrabold tracking-tight text-slate-800 dark:text-slate-100">CURA<span className="text-sky-600 dark:text-sky-400">TECH</span></div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400 tracking-wide">Pharmacy Management System</div>
             </div>
           </div>
