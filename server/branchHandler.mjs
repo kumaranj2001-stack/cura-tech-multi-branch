@@ -1,12 +1,17 @@
 /**
  * Branch Backend Operations & Access Control
- * Restricted strictly to the Developer role for branch creation.
- * Admin, Super Admin, and Staff are completely disallowed from creating branches.
+ * Branch management is restricted strictly to Developer and Super Admin roles.
+ * Standard Admin and Staff are completely disallowed from creating or modifying branches.
  */
 
-export function isBranchCreatorRole(role) {
+export function isBranchManagerRole(role) {
   if (!role) return false;
-  return String(role).trim().toLowerCase() === "developer";
+  const r = String(role).trim().toLowerCase();
+  return r === "developer" || r === "superadmin";
+}
+
+export function isBranchCreatorRole(role) {
+  return isBranchManagerRole(role);
 }
 
 export function validateBranchPayload(payload) {
@@ -32,6 +37,7 @@ export function validateBranchPayload(payload) {
     address: String(payload.address || "").trim(),
     gstNumber: String(payload.gstNumber || "").trim().toUpperCase(),
     phone: String(payload.phone || "").trim(),
+    email: String(payload.email || "").trim().toLowerCase(),
     active: payload.active !== false,
     createdAt: payload.createdAt || new Date().toISOString(),
   };
@@ -45,7 +51,7 @@ export function validateBranchPayload(payload) {
 
 export function createBranch(payload, existingBranches = [], role = "") {
   if (!isBranchCreatorRole(role)) {
-    const err = new Error("Access Denied: Only Developer can add or create branches. Access is not permitted for admin, super admin, or staff.");
+    const err = new Error("Access Denied: Only Developer and Super Admin can add or create branches. Standard Admin and Staff accounts are completely restricted.");
     err.statusCode = 403;
     throw err;
   }
@@ -73,9 +79,9 @@ export function createBranch(payload, existingBranches = [], role = "") {
 }
 
 export function updateBranch(id, patch, existingBranches = [], role = "") {
-  // Only developer can update or toggle branches
-  if (!isBranchCreatorRole(role)) {
-    const err = new Error("Access Denied: Only Developer can modify branch details or change active status.");
+  // Developer and Super Admin can update branch details
+  if (!isBranchManagerRole(role)) {
+    const err = new Error("Access Denied: Only Developer and Super Admin can modify branch details or change active status. Standard Admin and Staff are not permitted.");
     err.statusCode = 403;
     throw err;
   }
@@ -106,6 +112,7 @@ export function updateBranch(id, patch, existingBranches = [], role = "") {
     address: patch.address !== undefined ? String(patch.address).trim() : current.address,
     gstNumber: patch.gstNumber !== undefined ? String(patch.gstNumber).trim().toUpperCase() : current.gstNumber,
     phone: patch.phone !== undefined ? String(patch.phone).trim() : current.phone,
+    email: patch.email !== undefined ? String(patch.email).trim().toLowerCase() : (current.email || ""),
     active: patch.active !== undefined ? Boolean(patch.active) : current.active,
     updatedAt: new Date().toISOString(),
   };

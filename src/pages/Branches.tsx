@@ -2,13 +2,17 @@ import React, { useState } from "react";
 import { useStore, uid } from "../store/store";
 import { Card, CardBody, Input, Textarea, Label, Button, Modal, Badge, EmptyState } from "../components/ui";
 import type { Branch } from "../store/types";
-import { isOverseer } from "../store/types";
+import { isOverseer, planAllowsMultiBranch } from "../store/types";
 import { flashToast } from "../utils/helpers";
 import { Building2, Plus, ShieldCheck } from "lucide-react";
 
 const Branches: React.FC = () => {
-  const { data, setData, currentUser, log, flags } = useStore();
+  const { data, setData, currentUser, log, staffPlan, customStaffPlanLimits, setBranchProfile } = useStore();
+  const multiBranch = planAllowsMultiBranch(staffPlan, customStaffPlanLimits);
   const isDeveloper = currentUser?.role === "developer";
+  const isSuperAdmin = currentUser?.role === "superadmin";
+  const canManage = isDeveloper || (isSuperAdmin && multiBranch);
+
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<Branch | null>(null);
   const [loading, setLoading] = useState(false);
@@ -19,23 +23,18 @@ const Branches: React.FC = () => {
     address: "",
     gstNumber: "",
     phone: "",
+    email: "",
     active: true,
   });
 
-  if (!isOverseer(currentUser?.role) || flags.branchesVisible === false) {
+  if (!isOverseer(currentUser?.role)) {
     return (
       <Card>
         <CardBody className="text-center text-slate-500 dark:text-slate-400 py-12">
           <div className="flex flex-col items-center justify-center gap-2">
             <span className="text-3xl">⛔</span>
-            <div className="font-semibold text-slate-700 dark:text-slate-200">
-              {flags.branchesVisible === false ? "Branch Management Disabled" : "Developer or Super Admin access required"}
-            </div>
-            <p className="text-xs text-slate-400">
-              {flags.branchesVisible === false
-                ? "The branches option is disabled in Feature Controls."
-                : "Branch settings are only viewable by administrative overseers."}
-            </p>
+            <div className="font-semibold text-slate-700 dark:text-slate-200">Developer or Super Admin access required</div>
+            <p className="text-xs text-slate-400">Branch settings are only viewable by administrative overseers.</p>
           </div>
         </CardBody>
       </Card>
@@ -43,19 +42,18 @@ const Branches: React.FC = () => {
   }
 
   const openNew = () => {
-    // Branch adding is strictly restricted to Developer role
-    if (!isDeveloper) {
-      flashToast("Access Denied: Only Developer can add new branches", "err");
+    if (!canManage) {
+      flashToast("Access Denied: Only Developer and Super Admin with active multi-branch plan can add new branches", "err");
       return;
     }
     setEdit(null);
-    setForm({ name: "", code: "", storeName: "", address: "", gstNumber: "", phone: "", active: true });
+    setForm({ name: "", code: "", storeName: "", address: "", gstNumber: "", phone: "", email: "", active: true });
     setOpen(true);
   };
 
   const openEdit = (b: Branch) => {
-    if (!isDeveloper) {
-      flashToast("Access Denied: Only Developer can edit branch details", "err");
+    if (!canManage) {
+      flashToast("Access Denied: Only Developer and Super Admin with active multi-branch plan can edit branch details", "err");
       return;
     }
     setEdit(b);
@@ -66,6 +64,7 @@ const Branches: React.FC = () => {
       address: b.address || "",
       gstNumber: b.gstNumber || "",
       phone: b.phone || "",
+      email: b.email || "",
       active: b.active,
     });
     setOpen(true);
@@ -80,15 +79,14 @@ const Branches: React.FC = () => {
       return;
     }
 
+    if (!canManage) {
+      flashToast("Access Denied: Only Developer and Super Admin can manage branches.", "err");
+      return;
+    }
+
     setLoading(true);
 
     if (edit) {
-      // Editing existing branch — strictly restricted to Developer
-      if (!isDeveloper) {
-        setLoading(false);
-        flashToast("Access Denied: Only Developer can edit branch details", "err");
-        return;
-      }
       try {
         await fetch(`/api/branches/${edit.id}`, {
           method: "PUT",
@@ -104,6 +102,7 @@ const Branches: React.FC = () => {
               address: form.address.trim(),
               gstNumber: form.gstNumber.trim().toUpperCase(),
               phone: form.phone.trim(),
+              email: form.email.trim().toLowerCase(),
               active: form.active,
             },
             role: currentUser?.role,
@@ -125,23 +124,28 @@ const Branches: React.FC = () => {
                 address: form.address.trim(),
                 gstNumber: form.gstNumber.trim().toUpperCase(),
                 phone: form.phone.trim(),
+                email: form.email.trim().toLowerCase(),
                 active: form.active,
               }
             : b
         ),
       }));
+
+      if (multiBranch) {
+        setBranchProfile(edit.id, {
+          name: form.storeName.trim(),
+          address: form.address.trim(),
+          gstNumber: form.gstNumber.trim().toUpperCase(),
+          contact: form.phone.trim(),
+          email: form.email.trim().toLowerCase(),
+        });
+      }
+
       log("BRANCH_UPDATE", trimmedName);
       flashToast(`Branch "${trimmedName}" updated successfully`, "ok");
       setOpen(false);
       setLoading(false);
     } else {
-      // Branch creation — strictly restricted to Developer
-      if (!isDeveloper) {
-        setLoading(false);
-        flashToast("Access Denied: Only Developer can add branches. Super Admin, Admin, and Staff cannot add branches.", "err");
-        return;
-      }
-
       const duplicate = data.branches.find((b) => b.code.toUpperCase() === trimmedCode);
       if (duplicate) {
         setLoading(false);
@@ -156,6 +160,7 @@ const Branches: React.FC = () => {
         address: form.address.trim(),
         gstNumber: form.gstNumber.trim().toUpperCase(),
         phone: form.phone.trim(),
+        email: form.email.trim().toLowerCase(),
         active: form.active,
       };
 
@@ -192,6 +197,15 @@ const Branches: React.FC = () => {
       };
 
       setData((d) => ({ ...d, branches: [...d.branches, nb] }));
+      if (multiBranch) {
+        setBranchProfile(nb.id, {
+          name: nb.storeName || "",
+          address: nb.address || "",
+          gstNumber: nb.gstNumber || "",
+          contact: nb.phone || "",
+          email: nb.email || "",
+        });
+      }
       log("BRANCH_CREATE", nb.name);
       flashToast(`Branch "${nb.name}" (${nb.code}) created successfully`, "ok");
       setOpen(false);
@@ -283,7 +297,7 @@ const Branches: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-            {isDeveloper && (
+            {canManage && (
               <Button onClick={openNew} className="w-full sm:w-auto flex items-center justify-center gap-1.5 shadow-sm">
                 <Plus className="w-4 h-4" />
                 <span>+ New Branch</span>
@@ -300,7 +314,7 @@ const Branches: React.FC = () => {
             <CardBody>
               <EmptyState
                 message={
-                  isDeveloper
+                  canManage
                     ? "No branches yet. Click '+ New Branch' to create one."
                     : "No branches configured yet."
                 }
@@ -347,24 +361,33 @@ const Branches: React.FC = () => {
                   <span className="text-slate-400">📞</span> {b.phone}
                 </div>
               )}
+              {b.email && (
+                <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 flex items-center gap-1.5 truncate">
+                  <span className="text-slate-400">✉️</span> {b.email}
+                </div>
+              )}
 
               <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100 dark:border-slate-700/80">
                 <div className="text-[11px] text-slate-400">
                   Created: {new Date(b.createdAt).toLocaleDateString("en-IN")}
                 </div>
-                {isDeveloper && (
-                  <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1">
+                  {canManage && (
                     <Button size="sm" variant="ghost" onClick={() => openEdit(b)} title="Edit branch profile" aria-label="Edit branch profile">
                       ✏️
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => toggleActive(b)} title={b.active ? "Deactivate branch" : "Activate branch"} aria-label={b.active ? "Deactivate branch" : "Activate branch"}>
-                      {b.active ? "🚫" : "✅"}
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => remove(b)} title="Delete branch" aria-label="Delete branch" className="text-rose-600 hover:text-rose-700">
-                      🗑️
-                    </Button>
-                  </div>
-                )}
+                  )}
+                  {isDeveloper && (
+                    <>
+                      <Button size="sm" variant="ghost" onClick={() => toggleActive(b)} title={b.active ? "Deactivate branch" : "Activate branch"} aria-label={b.active ? "Deactivate branch" : "Activate branch"}>
+                        {b.active ? "🚫" : "✅"}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => remove(b)} title="Delete branch" aria-label="Delete branch" className="text-rose-600 hover:text-rose-700">
+                        🗑️
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
             </CardBody>
           </Card>
@@ -377,7 +400,7 @@ const Branches: React.FC = () => {
           {!edit && (
             <div className="rounded-lg bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800 p-3 text-xs text-sky-800 dark:text-sky-200 flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-sky-600 shrink-0" />
-              <span>Developer action: Adding new pharmacy branch to cloud database.</span>
+              <span>{isDeveloper ? "Developer action: Adding new pharmacy branch to cloud database." : "Super Admin: Creating branch under multi-branch plan."}</span>
             </div>
           )}
 
@@ -404,60 +427,71 @@ const Branches: React.FC = () => {
             </div>
           </div>
 
-          {/* Store profile — appears on this branch's tax invoices */}
-          <div className="pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="w-1.5 h-4 rounded-full bg-sky-500" />
-              <span className="text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                Store Profile — printed on invoices
-              </span>
+          {/* Store profile — appears on this branch's tax invoices when Multi-Branch is enabled */}
+          {multiBranch && (
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-700/60">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-1.5 h-4 rounded-full bg-sky-500" />
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                  Store Profile — printed on invoices
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label>Business / Pharmacy Name</Label>
+                  <Input
+                    value={form.storeName}
+                    onChange={(e) => setForm({ ...form, storeName: e.target.value })}
+                    placeholder="e.g. Guru Pharmacy"
+                    disabled={loading}
+                  />
+                </div>
+                <div>
+                  <Label>GST Number (GSTIN)</Label>
+                  <Input
+                    value={form.gstNumber}
+                    onChange={(e) => setForm({ ...form, gstNumber: e.target.value.toUpperCase() })}
+                    placeholder="22AAAAA0000A1Z5"
+                    maxLength={20}
+                    className="uppercase font-mono"
+                    disabled={loading}
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <Label>Official Registered Address</Label>
+                  <Textarea
+                    value={form.address}
+                    onChange={(e) => setForm({ ...form, address: e.target.value })}
+                    placeholder="Full registered address (press Enter for new lines)"
+                    rows={3}
+                    disabled={loading}
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Multi-line address formatting is preserved on invoices and printed documents.
+                  </p>
+                </div>
+                <div>
+                  <Label>Official Phone Number</Label>
+                  <Input
+                    value={form.phone}
+                    onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                    placeholder="Branch phone number"
+                    disabled={loading}
+                  />
+                </div>
+                <div>
+                  <Label>Official Email Address</Label>
+                  <Input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => setForm({ ...form, email: e.target.value })}
+                    placeholder="e.g. branch@gurupharmacy.com"
+                    disabled={loading}
+                  />
+                </div>
+              </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <Label>Pharmacy Display Name</Label>
-                <Input
-                  value={form.storeName}
-                  onChange={(e) => setForm({ ...form, storeName: e.target.value })}
-                  placeholder="e.g. Guru Pharmacy"
-                  disabled={loading}
-                />
-              </div>
-              <div>
-                <Label>GST Number (GSTIN)</Label>
-                <Input
-                  value={form.gstNumber}
-                  onChange={(e) => setForm({ ...form, gstNumber: e.target.value.toUpperCase() })}
-                  placeholder="22AAAAA0000A1Z5"
-                  maxLength={20}
-                  className="uppercase font-mono"
-                  disabled={loading}
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <Label>Registered Address</Label>
-                <Textarea
-                  value={form.address}
-                  onChange={(e) => setForm({ ...form, address: e.target.value })}
-                  placeholder="Full registered address (press Enter for new lines)"
-                  rows={3}
-                  disabled={loading}
-                />
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Multi-line address formatting is preserved on invoices and printed documents.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <Label>Phone</Label>
-            <Input
-              value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
-              placeholder="Branch phone number"
-              disabled={loading}
-            />
-          </div>
+          )}
 
           <div className="flex items-center gap-2 pt-1">
             <input

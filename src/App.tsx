@@ -57,15 +57,16 @@ const Inner: React.FC = () => {
     setPage("settings");
     return null;
   }
-  // Branches hidden when developer toggle branchesVisible is turned off
-  if (page === "branches" && flags.branchesVisible === false) {
-    setPage("dashboard");
-    return null;
-  }
-  // Branches tab / multi-branch tools: Developer always has access; Super Admin requires multi-branch plan
-  if (page === "branches" && currentUser.role !== "developer" && !planAllowsMultiBranch(staffPlan, customStaffPlanLimits)) {
-    setPage("dashboard");
-    return null;
+  // Branches tab: When branchesVisible toggle is false, it is completely hidden. When true, Developer has access; Super Admin requires multi-branch plan
+  if (page === "branches") {
+    if (!flags.branchesVisible) {
+      setPage("dashboard");
+      return null;
+    }
+    if (currentUser.role !== "developer" && !(currentUser.role === "superadmin" && planAllowsMultiBranch(staffPlan, customStaffPlanLimits))) {
+      setPage("dashboard");
+      return null;
+    }
   }
   // Users is admin/overseer only; Settings is open to staff too (branch payment settings)
   if (page === "users" && currentUser.role !== "admin" && !isOverseer(currentUser.role)) {

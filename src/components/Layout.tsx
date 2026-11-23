@@ -43,6 +43,7 @@ const NAV: NavItem[] = [
   { id: "doctors", label: "Doctors", icon: "🩺", staffAllowed: true },
   { id: "inventory", label: "Inventory", icon: "💊", staffAllowed: true },
   { id: "purchases", label: "GRN Entry", icon: "🛒", staffAllowed: true },
+  { id: "branches", label: "Branches", icon: "🏪", developerOnly: true },
   { id: "grn", label: "GRN Approvals", icon: "✅", staffAllowed: false },
   { id: "approvedGrn", label: "Approved GRNs", icon: "📦", developerOnly: true },
   { id: "salesReturn", label: "Sales Return", icon: "🔄", staffAllowed: true },
@@ -51,7 +52,6 @@ const NAV: NavItem[] = [
   { id: "reports", label: "Reports", icon: "📈", staffAllowed: false },
   { id: "audit", label: "Audit Log", icon: "🔍", developerOnly: true },
   { id: "users", label: "Users", icon: "🔐", adminOnly: true },
-  { id: "branches", label: "Branches", icon: "🏪", developerOnly: true },
   { id: "settings", label: "Settings", icon: "⚙️", staffAllowed: true },
   { id: "privacy", label: "Privacy Policy", icon: "🛡️", developerOnly: true },
 ];
@@ -70,9 +70,13 @@ const Layout: React.FC<{ page: PageId; setPage: (p: PageId) => void; children: R
     if (!flags.grnModule && (n.id === "purchases" || n.id === "grn" || n.id === "approvedGrn")) return false;
     // hide Audit Log when logging is disabled
     if (!flags.auditEnabled && n.id === "audit") return false;
-    // hide Branches when developer toggle branchesVisible is turned off
-    if (n.id === "branches" && flags.branchesVisible === false) return false;
-    if (n.id === "branches" && !multiBranch && currentUser?.role !== "developer") return false;
+    // Developer toggle for Branch Management visibility
+    if (n.id === "branches") {
+      if (!flags.branchesVisible) return false;
+      if (currentUser?.role === "developer") return true;
+      if (currentUser?.role === "superadmin" && multiBranch) return true;
+      return false;
+    }
     // Privacy policy option in menu is accessible purely to Developer (non-developers see it embedded in Settings)
     if (n.id === "privacy" && currentUser?.role !== "developer") return false;
     if (currentUser?.role === "developer") return true;
@@ -180,7 +184,7 @@ const Layout: React.FC<{ page: PageId; setPage: (p: PageId) => void; children: R
                       <Network className="w-3.5 h-3.5" />
                       {currentUser?.role === "developer" ? "Developer" : "Super Admin"}
                     </span>
-                    {multiBranch && flags.branchesVisible !== false && (
+                    {multiBranch && (
                     <label className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-900/30 pl-2.5 pr-1 py-0.5 text-sky-700 dark:text-sky-300 font-medium">
                       <span className="whitespace-nowrap">{viewBranchId ? "Viewing" : "All Branches"}</span>
                       <select

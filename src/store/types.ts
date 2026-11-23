@@ -14,6 +14,7 @@ export interface Branch {
   address?: string;     // registered address
   gstNumber?: string;   // GSTIN
   phone?: string;
+  email?: string;       // official email
   active: boolean;
   createdAt: string;
 }
@@ -130,6 +131,7 @@ export interface StoreProfile {
   address?: string;   // registered address
   contact?: string;   // phone / contact
   gstNumber?: string; // GSTIN
+  email?: string;     // official store email
 }
 
 export interface Supplier {

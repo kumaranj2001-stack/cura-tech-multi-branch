@@ -1,10 +1,10 @@
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import { useStore } from "../store/store";
 import { useTheme } from "../store/theme";
-import { Card, CardBody, Button, Label, Input, Select, Modal } from "../components/ui";
+import { Card, CardBody, Button, Label, Input, Textarea, Select, Modal } from "../components/ui";
 import { downloadJSON, flashToast, compressImageFile } from "../utils/helpers";
 import type { FeatureFlags, StaffPlanLimits } from "../store/types";
-import { isOverseer, STAFF_PLAN_OPTIONS, formatPlanCap, staffPlanLimits, DEFAULT_CUSTOM_STAFF_LIMITS } from "../store/types";
+import { isOverseer, STAFF_PLAN_OPTIONS, formatPlanCap, staffPlanLimits, DEFAULT_CUSTOM_STAFF_LIMITS, planAllowsMultiBranch } from "../store/types";
 import { parseBranchBackup } from "../store/store";
 import { firebaseConfig } from "../config/firebaseConfig";
 import Privacy from "./Privacy";
@@ -149,6 +149,17 @@ const FLAG_GROUPS: {
     ],
   },
   {
+    title: "Branch Management",
+    icon: Building2,
+    items: [
+      {
+        key: "branchesVisible",
+        label: "Branches Option (Developer View)",
+        hint: "When enabled, the Branches option is visible in the developer view. When disabled, it is completely hidden.",
+      },
+    ],
+  },
+  {
     title: "Suppliers & Self-Registration",
     icon: Building2,
     items: [
@@ -156,17 +167,6 @@ const FLAG_GROUPS: {
         key: "supplierSelfRegistration",
         label: "Permit Supplier Self-Registration",
         hint: "When enabled, suppliers are permitted to register or add themselves directly. When disabled, self-registration is turned off, restricting supplier creation solely to Developer control.",
-      },
-    ],
-  },
-  {
-    title: "Branch Management",
-    icon: Building2,
-    items: [
-      {
-        key: "branchesVisible",
-        label: "Branches Option (Developer View)",
-        hint: "When enabled, the 'Branches' option is visible in the developer view. When disabled, the 'Branches' option is completely hidden.",
       },
     ],
   },
@@ -393,13 +393,108 @@ service cloud.firestore {
 }`;
 
 const Settings: React.FC = () => {
-  const { data, currentUser, log, cloudReady, cloudSyncing, cloudError, flags, setFlag, setFlagsBatch, staffPlan, setStaffPlan, customStaffPlanLimits, payment, branchPayments, setBranchPayment, buildBranchBackup, restoreBranchBackup, purgeAllBusinessData } = useStore();
+  const { data, setData, currentUser, log, cloudReady, cloudSyncing, cloudError, flags, setFlag, setFlagsBatch, staffPlan, setStaffPlan, customStaffPlanLimits, payment, branchPayments, setBranchPayment, branchProfiles, setBranchProfile, buildBranchBackup, restoreBranchBackup, purgeAllBusinessData } = useStore();
+  const multiBranch = planAllowsMultiBranch(staffPlan, customStaffPlanLimits);
   const isSuperAdmin = currentUser?.role === "superadmin";
   const isAdmin = currentUser?.role === "admin";
   const isDeveloper = isOverseer(currentUser?.role);
   const isDevAccount = currentUser?.role === "developer";
   const isStaff = currentUser?.role === "staff";
   const canViewPayments = isAdmin || isSuperAdmin;
+
+  const targetMainBranch = data.branches[0];
+  const targetMainBranchId = targetMainBranch?.id || "br_main";
+  const activeProfile = branchProfiles[targetMainBranchId] || {};
+
+  const [storeProfileForm, setStoreProfileForm] = useState({
+    name: activeProfile.name || targetMainBranch?.storeName || targetMainBranch?.name || "",
+    gstNumber: activeProfile.gstNumber || targetMainBranch?.gstNumber || "",
+    address: activeProfile.address || targetMainBranch?.address || "",
+    contact: activeProfile.contact || targetMainBranch?.phone || "",
+    email: activeProfile.email || targetMainBranch?.email || "",
+  });
+  const [savingStoreProfile, setSavingStoreProfile] = useState(false);
+
+  useEffect(() => {
+    const prof = branchProfiles[targetMainBranchId];
+    if (prof) {
+      setStoreProfileForm({
+        name: prof.name || targetMainBranch?.storeName || targetMainBranch?.name || "",
+        gstNumber: prof.gstNumber || targetMainBranch?.gstNumber || "",
+        address: prof.address || targetMainBranch?.address || "",
+        contact: prof.contact || targetMainBranch?.phone || "",
+        email: prof.email || targetMainBranch?.email || "",
+      });
+    } else if (targetMainBranch) {
+      setStoreProfileForm((prev) => ({
+        name: prev.name || targetMainBranch.storeName || targetMainBranch.name || "",
+        gstNumber: prev.gstNumber || targetMainBranch.gstNumber || "",
+        address: prev.address || targetMainBranch.address || "",
+        contact: prev.contact || targetMainBranch.phone || "",
+        email: prev.email || targetMainBranch.email || "",
+      }));
+    }
+  }, [branchProfiles, targetMainBranchId, targetMainBranch]);
+
+  const handleSaveStoreProfile = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!isSuperAdmin && !isDevAccount) {
+      flashToast("Access Denied: Only Super Admin can modify store profile details.", "err");
+      return;
+    }
+    setSavingStoreProfile(true);
+    try {
+      const payload = {
+        branchId: targetMainBranchId,
+        name: storeProfileForm.name.trim(),
+        gstNumber: storeProfileForm.gstNumber.trim().toUpperCase(),
+        address: storeProfileForm.address.trim(),
+        contact: storeProfileForm.contact.trim(),
+        email: storeProfileForm.email.trim().toLowerCase(),
+        role: currentUser?.role,
+      };
+
+      setBranchProfile(targetMainBranchId, {
+        name: payload.name,
+        gstNumber: payload.gstNumber,
+        address: payload.address,
+        contact: payload.contact,
+        email: payload.email,
+      });
+
+      setData((d) => ({
+        ...d,
+        branches: d.branches.map((b) =>
+          b.id === targetMainBranchId
+            ? {
+                ...b,
+                storeName: payload.name,
+                gstNumber: payload.gstNumber,
+                address: payload.address,
+                phone: payload.contact,
+                email: payload.email,
+              }
+            : b
+        ),
+      }));
+
+      await fetch("/api/store-profile", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-role": currentUser?.role || "",
+        },
+        body: JSON.stringify(payload),
+      }).catch((err) => console.warn("[StoreProfile backend save warning]", err));
+
+      log("STORE_PROFILE_UPDATE", `Store profile updated for ${targetMainBranch?.name || targetMainBranchId}`);
+      flashToast("Store profile saved successfully! Updated details will appear on invoices.", "ok");
+    } catch (err: any) {
+      flashToast(err?.message || "Failed to save store profile", "err");
+    } finally {
+      setSavingStoreProfile(false);
+    }
+  };
 
   // Option 5 - Fully Customizable Account Plan state
   const [customModalOpen, setCustomModalOpen] = useState(false);
@@ -606,6 +701,98 @@ const Settings: React.FC = () => {
           </div>
         </CardBody>
       </Card>
+
+      {/* Store Profile — Exclusively for Super Admin when Multi-Branch is disabled */}
+      {!multiBranch && (isSuperAdmin || isDevAccount) && (
+        <Card>
+          <CardBody className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-700/60 pb-3">
+              <div>
+                <div className="font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                  🏪 Store Profile Configuration
+                </div>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                  Configure official pharmacy details printed on sales invoices and receipts.
+                </p>
+              </div>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/30 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300 shrink-0 self-start sm:self-auto">
+                Super Admin exclusive
+              </span>
+            </div>
+
+            <form onSubmit={handleSaveStoreProfile} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label>Business / Pharmacy Name *</Label>
+                  <Input
+                    value={storeProfileForm.name}
+                    onChange={(e) => setStoreProfileForm({ ...storeProfileForm, name: e.target.value })}
+                    placeholder="e.g. Guru Pharmacy"
+                    required
+                    disabled={savingStoreProfile}
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">Header name on tax invoices and receipts</p>
+                </div>
+                <div>
+                  <Label>GST Number (GSTIN)</Label>
+                  <Input
+                    value={storeProfileForm.gstNumber}
+                    onChange={(e) => setStoreProfileForm({ ...storeProfileForm, gstNumber: e.target.value.toUpperCase() })}
+                    placeholder="e.g. 33AAAAA0000A1Z5"
+                    className="uppercase font-mono"
+                    maxLength={20}
+                    disabled={savingStoreProfile}
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">Official GSTIN printed on tax invoices</p>
+                </div>
+                <div className="sm:col-span-2">
+                  <Label>Official Registered Address</Label>
+                  <Textarea
+                    value={storeProfileForm.address}
+                    onChange={(e) => setStoreProfileForm({ ...storeProfileForm, address: e.target.value })}
+                    placeholder="Full registered address (Street, Area, City, State, PIN)"
+                    rows={3}
+                    disabled={savingStoreProfile}
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">Multi-line address formatting is preserved on invoices and printed slips</p>
+                </div>
+                <div>
+                  <Label>Official Phone Number</Label>
+                  <Input
+                    value={storeProfileForm.contact}
+                    onChange={(e) => setStoreProfileForm({ ...storeProfileForm, contact: e.target.value })}
+                    placeholder="e.g. +91 98765 43210"
+                    disabled={savingStoreProfile}
+                  />
+                </div>
+                <div>
+                  <Label>Official Email Address</Label>
+                  <Input
+                    type="email"
+                    value={storeProfileForm.email}
+                    onChange={(e) => setStoreProfileForm({ ...storeProfileForm, email: e.target.value })}
+                    placeholder="e.g. contact@gurupharmacy.com"
+                    disabled={savingStoreProfile}
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-700/60">
+                <Button type="submit" disabled={savingStoreProfile} className="w-full sm:w-auto flex items-center justify-center gap-1.5">
+                  {savingStoreProfile ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Saving Store Profile...</span>
+                    </>
+                  ) : (
+                    <span>Save Store Profile</span>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </CardBody>
+        </Card>
+      )}
 
       {/* Cloud Backend — Developer only */}
       {isDevAccount && (
